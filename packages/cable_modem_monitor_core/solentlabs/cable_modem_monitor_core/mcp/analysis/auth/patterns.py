@@ -1,7 +1,8 @@
 """Load auth detection patterns from JSON.
 
-Single source of truth for login URL patterns, nonce prefixes, and
-PBKDF2 triggers. Shared by ``mcp.analysis.auth.http`` (Phase 2) and
+Single source of truth for login URL patterns, nonce prefixes,
+PBKDF2 triggers, and SJCL indicators. Shared by
+``mcp.analysis.auth.http`` (Phase 2) and
 ``mcp.validation.auth_flow`` (HAR validation gate).
 
 Follows the same data-driven pattern as ``mapping.registry_loader``
@@ -47,6 +48,21 @@ def get_pbkdf2_salt_triggers() -> tuple[str, ...]:
     """Return PBKDF2 salt trigger patterns for POST body detection."""
     data = _load_patterns()
     return tuple(data["pbkdf2_salt_triggers"])
+
+
+def get_sjcl_page_variables() -> tuple[str, ...]:
+    """Return JS variable names that indicate SJCL AES-CCM auth.
+
+    These appear in the login page HTML as ``var myIv = '...'`` etc.
+    """
+    data = _load_patterns()
+    return tuple(data["sjcl_page_variables"])
+
+
+def get_sjcl_post_fields() -> tuple[str, ...]:
+    """Return POST body field names that indicate SJCL encrypted payload."""
+    data = _load_patterns()
+    return tuple(data["sjcl_post_fields"])
 
 
 def get_session_cookie_indicators() -> frozenset[str]:

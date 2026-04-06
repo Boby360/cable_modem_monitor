@@ -1,7 +1,7 @@
 """Phase 2 - Auth strategy detection.
 
 Dispatches to transport-specific modules:
-- ``http`` - HTTP decision tree (6 strategies)
+- ``http`` - HTTP decision tree (7 strategies)
 - ``hnap`` - HNAP HMAC detection
 
 Per docs/ONBOARDING_SPEC.md Phase 2.

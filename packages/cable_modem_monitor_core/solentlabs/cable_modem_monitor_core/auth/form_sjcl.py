@@ -51,6 +51,16 @@ _VAR_RE = re.compile(
     r"(?:var\s+)?(\w+)\s*=\s*'([^']*)'",
 )
 
+_VALUE_PREVIEW_MAX = 200
+
+
+def _safe_preview(value: object, max_len: int = _VALUE_PREVIEW_MAX) -> str:
+    """Return a repr-based preview of *value*, truncated for safety."""
+    text = repr(value)
+    if len(text) > max_len:
+        return text[:max_len] + "..."
+    return text
+
 
 class FormSjclAuthManager(BaseAuthManager):
     """SJCL AES-CCM encrypted form auth.
@@ -340,7 +350,9 @@ def _post_json(
 ) -> tuple[requests.Response, dict[str, Any]] | AuthResult:
     """POST JSON and return (response, parsed JSON body).
 
-    Returns AuthResult on network or parse errors.
+    Logs the raw response body at DEBUG level for diagnostics.
+    Returns AuthResult on network or parse errors, including a
+    truncated preview of the response value in the error message.
     """
     try:
         resp = session.post(url, json=payload, timeout=timeout)
@@ -349,12 +361,19 @@ def _post_json(
             raise
         return AuthResult(success=False, error=f"POST failed: {e}")
 
+    _logger.debug(
+        "POST %s response: status=%d, body=%s",
+        url,
+        resp.status_code,
+        _safe_preview(resp.text),
+    )
+
     try:
         data = resp.json()
     except ValueError:
         return AuthResult(
             success=False,
-            error="Response is not valid JSON",
+            error=f"Response is not valid JSON: {_safe_preview(resp.text)}",
         )
 
     # Some firmwares double-encode: the HTTP body is a JSON string
@@ -366,7 +385,7 @@ def _post_json(
     if not isinstance(data, dict):
         return AuthResult(
             success=False,
-            error=f"Expected JSON object, got {type(data).__name__}",
+            error=f"Expected JSON object, got {type(data).__name__}: {_safe_preview(data)}",
         )
 
     return resp, data

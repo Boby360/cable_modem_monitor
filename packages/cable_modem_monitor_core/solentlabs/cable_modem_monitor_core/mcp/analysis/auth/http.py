@@ -1,8 +1,8 @@
 """Phase 2 - HTTP auth strategy detection.
 
 Implements the HTTP branch of the ONBOARDING_SPEC Phase 2 decision tree.
-Walks: none -> basic -> url_token -> form_pbkdf2 -> form_nonce -> form ->
-hard stop.
+Walks: none -> basic -> url_token -> form_sjcl -> form_pbkdf2 ->
+form_nonce -> form -> hard stop.
 
 Per docs/ONBOARDING_SPEC.md Phase 2 (HTTP transport).
 """
@@ -28,6 +28,8 @@ from .patterns import (
     get_nonce_error_prefix,
     get_nonce_success_prefix,
     get_pbkdf2_salt_triggers,
+    get_sjcl_page_variables,
+    get_sjcl_post_fields,
 )
 
 # ---------------------------------------------------------------------------
@@ -38,6 +40,8 @@ _LOGIN_URL_PATTERNS: tuple[str, ...] = get_login_url_patterns()
 _NONCE_SUCCESS_PREFIX: str = get_nonce_success_prefix()
 _NONCE_ERROR_PREFIX: str = get_nonce_error_prefix()
 _PBKDF2_SALT_TRIGGERS: tuple[str, ...] = get_pbkdf2_salt_triggers()
+_SJCL_PAGE_VARS: tuple[str, ...] = get_sjcl_page_variables()
+_SJCL_POST_FIELDS: tuple[str, ...] = get_sjcl_post_fields()
 
 # Base64 pattern: login_<base64> or login%5f<base64> in URL
 _URL_TOKEN_PATTERN = re.compile(r"login[_\-%]", re.IGNORECASE)
@@ -57,8 +61,8 @@ def detect_http_auth(
 ) -> AuthDetail:
     """Walk the HTTP auth decision tree.
 
-    Order: none -> basic -> url_token -> form_pbkdf2 -> form_nonce ->
-    form -> hard stop.
+    Order: none -> basic -> url_token -> form_sjcl -> form_pbkdf2 ->
+    form_nonce -> form -> hard stop.
 
     Args:
         entries: HAR ``log.entries`` list.
@@ -96,6 +100,10 @@ def detect_http_auth(
     # URL token pattern -> url_token
     if signals.url_token_entry is not None:
         return _extract_url_token(entries, signals)
+
+    # SJCL AES-CCM encrypted login -> form_sjcl (must check before pbkdf2)
+    if signals.sjcl_login_entry is not None:
+        return _extract_form_sjcl(entries, signals)
 
     # JSON POST with PBKDF2 salt flow -> form_pbkdf2
     if signals.pbkdf2_entries:
@@ -151,6 +159,8 @@ class _HttpAuthSignals:
     url_token_login_page: str = ""
     form_post_entry: dict[str, Any] | None = None
     form_nonce_entry: dict[str, Any] | None = None
+    sjcl_login_entry: dict[str, Any] | None = None
+    sjcl_login_page_html: str = ""
     pbkdf2_entries: list[dict[str, Any]] = field(default_factory=list)
     has_401: bool = False
     has_302_after_post: bool = False
@@ -201,6 +211,10 @@ def _collect_http_signals(entries: list[dict[str, Any]]) -> _HttpAuthSignals:
 
     for entry in entries:
         _check_entry_auth_signals(entry, entries, signals)
+
+    # If SJCL login detected, find the login page with JS variables.
+    if signals.sjcl_login_entry is not None:
+        signals.sjcl_login_page_html = _find_sjcl_login_page(entries, signals.sjcl_login_entry)
 
     return signals
 
@@ -268,13 +282,19 @@ def _check_post_signals(
     post_data = req.get("postData", {})
     mime = post_data.get("mimeType", "").lower()
 
-    # JSON POST - check for PBKDF2 salt trigger
+    # JSON POST - check for SJCL or PBKDF2
     if "json" in mime:
         text = post_data.get("text", "")
-        is_salt = any(trigger in text.lower() for trigger in _PBKDF2_SALT_TRIGGERS)
-        if is_salt or _is_login_url(url):
-            signals.pbkdf2_entries.append(entry)
+
+        # SJCL: POST body contains EncryptData/AuthData fields
+        if _is_login_url(url) and any(f in text for f in _SJCL_POST_FIELDS):
+            signals.sjcl_login_entry = entry
             signals.has_any_auth_signal = True
+        else:
+            is_salt = any(trigger in text.lower() for trigger in _PBKDF2_SALT_TRIGGERS)
+            if is_salt or _is_login_url(url):
+                signals.pbkdf2_entries.append(entry)
+                signals.has_any_auth_signal = True
 
     # Form POST to login-like endpoint
     if "form" in mime or "x-www-form-urlencoded" in mime:
@@ -338,6 +358,139 @@ def _extract_url_token(entries: list[dict[str, Any]], signals: _HttpAuthSignals)
             "success_indicator": success_indicator,
         },
         confidence="high",
+    )
+
+
+def _find_sjcl_login_page(
+    entries: list[dict[str, Any]],
+    sjcl_post_entry: dict[str, Any],
+) -> str:
+    """Find the login page HTML containing SJCL JS variables.
+
+    Scans GET responses before the SJCL POST for pages containing
+    ``myIv`` or ``mySalt`` variable assignments.
+    """
+    for entry in entries:
+        if entry is sjcl_post_entry:
+            break
+        req = entry["request"]
+        if req.get("method", "") != "GET":
+            continue
+        content = entry["response"].get("content", {})
+        text: str = content.get("text", "")
+        if not text:
+            continue
+        # Check for SJCL JS variables on the page
+        if any(var in text for var in _SJCL_PAGE_VARS):
+            return text
+    return ""
+
+
+def _find_sjcl_login_page_path(
+    entries: list[dict[str, Any]],
+    login_post_entry: dict[str, Any],
+) -> str:
+    """Find the login page path from GET responses before the login POST.
+
+    Prefers HTML pages over JS files — the auth manager fetches the
+    HTML page, and the SJCL variables may be inline or in a linked script.
+    """
+    login_page = "/"
+    login_page_is_html = False
+    for e in entries:
+        if e is login_post_entry:
+            break
+        if e["request"].get("method") != "GET":
+            continue
+        content = e["response"].get("content", {})
+        text = content.get("text", "")
+        if not text or not any(var in text for var in _SJCL_PAGE_VARS):
+            continue
+        mime = content.get("mimeType", "")
+        is_html = "html" in mime
+        if is_html or not login_page_is_html:
+            login_page = path_from_url(e["request"].get("url", "/"))
+            login_page_is_html = is_html
+            if is_html:
+                break
+    return login_page
+
+
+def _find_sjcl_session_validation(
+    entries: list[dict[str, Any]],
+    login_post_entry: dict[str, Any],
+    csrf_header: str,
+) -> str:
+    """Find the session validation endpoint after the login POST.
+
+    Looks for the first POST after login that carries the CSRF header
+    with a non-``"undefined"`` value.
+    """
+    past_login = False
+    for e in entries:
+        if e is login_post_entry:
+            past_login = True
+            continue
+        if not past_login or e["request"].get("method") != "POST":
+            continue
+        if not csrf_header:
+            continue
+        e_hdrs = {h["name"].lower(): h["value"] for h in e["request"].get("headers", [])}
+        val = e_hdrs.get(csrf_header.lower(), "")
+        if val and val != "undefined":
+            return path_from_url(e["request"].get("url", ""))
+    return ""
+
+
+def _extract_sjcl_encrypt_aad(post_text: str) -> str:
+    """Extract the encrypt AAD from the login POST body's AuthData field."""
+    import json
+
+    try:
+        body = json.loads(post_text)
+        if isinstance(body, dict) and "AuthData" in body:
+            return str(body["AuthData"])
+    except (ValueError, TypeError):
+        pass
+    return "loginPassword"  # SJCL default
+
+
+def _extract_form_sjcl(
+    entries: list[dict[str, Any]],
+    signals: _HttpAuthSignals,
+) -> AuthDetail:
+    """Extract form_sjcl auth fields from SJCL AES-CCM login flow."""
+    entry = signals.sjcl_login_entry
+    assert entry is not None  # guaranteed by caller
+    req = entry["request"]
+    url = req.get("url", "")
+    post_text = req.get("postData", {}).get("text", "")
+
+    login_page = _find_sjcl_login_page_path(entries, entry)
+    encrypt_aad = _extract_sjcl_encrypt_aad(post_text)
+
+    # Extract CSRF header from the POST's request headers
+    csrf_header = ""
+    for h in req.get("headers", []):
+        name_lower = h["name"].lower()
+        if "csrf" in name_lower or "nonce" in name_lower:
+            csrf_header = h["name"]
+            break
+
+    session_validation = _find_sjcl_session_validation(entries, entry, csrf_header)
+    confidence = "high" if signals.sjcl_login_page_html else "medium"
+
+    return AuthDetail(
+        strategy="form_sjcl",
+        fields={
+            "login_page": login_page,
+            "login_endpoint": path_from_url(url),
+            "session_validation_endpoint": session_validation,
+            "csrf_header": csrf_header,
+            "encrypt_aad": encrypt_aad,
+            "decrypt_aad": "nonce",
+        },
+        confidence=confidence,
     )
 
 

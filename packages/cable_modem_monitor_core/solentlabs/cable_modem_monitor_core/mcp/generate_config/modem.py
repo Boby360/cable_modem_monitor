@@ -102,6 +102,7 @@ def _build_auth_block(
         if strategy == "url_token" and session_data.get("token_prefix"):
             result["token_prefix"] = session_data["token_prefix"]
 
+    _inject_strategy_defaults(result)
     _clean_auth_defaults(result)
     return result
 
@@ -149,6 +150,33 @@ def _build_single_action(action: dict[str, Any]) -> dict[str, Any]:
             result["params"] = action["params"]
 
     return result
+
+
+# -----------------------------------------------------------------------
+# Strategy-specific defaults — inject required fields not in the HAR
+# -----------------------------------------------------------------------
+
+# SJCL AES-CCM defaults: well-known crypto parameters for the Stanford
+# JavaScript Crypto Library.  These are not visible in the HAR wire
+# traffic — they are embedded in the modem's JS source code.  All known
+# SJCL modems use these values.
+_SJCL_DEFAULTS: dict[str, int] = {
+    "pbkdf2_iterations": 1000,
+    "pbkdf2_key_length": 128,
+    "ccm_tag_length": 16,
+}
+
+
+def _inject_strategy_defaults(block: dict[str, Any]) -> None:
+    """Inject required defaults for strategies with known crypto parameters.
+
+    Modifies the dict in place.  Only fills keys that are absent —
+    analysis-extracted values always win.
+    """
+    strategy = block.get("strategy")
+    if strategy == "form_sjcl":
+        for key, value in _SJCL_DEFAULTS.items():
+            block.setdefault(key, value)
 
 
 # -----------------------------------------------------------------------

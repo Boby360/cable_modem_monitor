@@ -118,6 +118,7 @@ Check the **first request** in the HAR:
 | POST to login endpoint with form body | `form` (or variant — continue analysis) |
 | `HNAP_AUTH` header on any request | `hnap` auth |
 | URL contains base64-encoded credentials | `url_token` auth |
+| JSON POST with SJCL AES-CCM encrypted payload (`EncryptData`) | `form_sjcl` auth |
 | JSON POST with salt/PBKDF2 flow | `form_pbkdf2` auth |
 | No auth headers, no login, immediate 200 with data | `none` auth |
 
@@ -219,6 +220,15 @@ Check HAR entries for login flow:
   │   └── Ambiguous response format → flag for human review
   │
   ├── POST with JSON body containing credentials
+  │   ├── Login page has SJCL JS variables (myIv, mySalt, encryptflag)?
+  │   │   POST body contains EncryptData field?
+  │   │   └── strategy: form_sjcl
+  │   │       Extract: login_page, login_endpoint,
+  │   │                session_validation_endpoint,
+  │   │                csrf_header, encrypt_aad, decrypt_aad
+  │   │       (pbkdf2_iterations, pbkdf2_key_length, ccm_tag_length
+  │   │        extracted from JS or set to SJCL defaults)
+  │   │
   │   ├── Multi-request salt/challenge flow?
   │   │   └── strategy: form_pbkdf2
   │   │       Extract: login_endpoint, salt_trigger,
@@ -1471,7 +1481,7 @@ Reproduced from [MODEM_YAML_SPEC.md](MODEM_YAML_SPEC.md#validation-rules) for qu
 
 | Transport | Valid auth strategies | Valid formats | Valid action types |
 |-----------|---------------------|---------------|-------------------|
-| `http` | `none`, `basic`, `form`, `form_nonce`, `url_token`, `form_pbkdf2` | `table`, `table_transposed`, `html_fields`, `javascript`, `json`, `xml` | `http` |
+| `http` | `none`, `basic`, `form`, `form_nonce`, `url_token`, `form_pbkdf2`, `form_sjcl` | `table`, `table_transposed`, `html_fields`, `javascript`, `json`, `xml` | `http` |
 | `hnap` | `hnap` | `hnap` | `hnap` |
 
 ---

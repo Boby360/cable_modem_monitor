@@ -28,7 +28,7 @@ session:
 actions:
   logout:
     type: http
-    method: GET
+    method: POST
     endpoint: "/php/logout.php"
 
 hardware:

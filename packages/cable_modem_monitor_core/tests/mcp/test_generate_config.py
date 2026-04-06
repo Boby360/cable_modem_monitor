@@ -147,6 +147,16 @@ class TestSessionBehavior:
         assert modem["auth"]["strategy"] == "form"
         assert "token_prefix" not in modem["auth"]
 
+    def test_form_sjcl_injects_crypto_defaults(self) -> None:
+        """form_sjcl auth injects SJCL crypto defaults (iterations, key_length, tag_length)."""
+        fixture = load_fixture(self._find_fixture("form_sjcl_defaults"))
+        result = generate_config(fixture["_analysis"], fixture["_metadata"])
+        modem = yaml.safe_load(result.modem_yaml)
+        auth = modem["auth"]
+        assert auth["strategy"] == "form_sjcl"
+        for key, expected in fixture["_expected_auth_fields"].items():
+            assert auth.get(key) == expected, f"{key}: expected {expected}, got {auth.get(key)}"
+
 
 # ---------------------------------------------------------------------------
 # Spot-check: actions

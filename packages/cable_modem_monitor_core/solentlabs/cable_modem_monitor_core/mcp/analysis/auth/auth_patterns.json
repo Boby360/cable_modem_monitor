@@ -19,6 +19,15 @@
   "pbkdf2_salt_triggers": [
     "seeksalthash"
   ],
+  "sjcl_page_variables": [
+    "myIv",
+    "mySalt",
+    "encryptflag"
+  ],
+  "sjcl_post_fields": [
+    "EncryptData",
+    "AuthData"
+  ],
   "session_cookie_indicators": [
     "sessionid",
     "session",
