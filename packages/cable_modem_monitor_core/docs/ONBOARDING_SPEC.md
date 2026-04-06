@@ -356,16 +356,35 @@ record layout and parser.yaml example.
 
 For each data page in the HAR, examine the response body:
 
+**Pre-processing (before format dispatch):**
+
+1. **HAR base64 decoding.** If `content.encoding == "base64"` on the
+   HAR response, decode the body first. Some modems (e.g., dm1000)
+   produce base64-encoded responses that browsers record verbatim.
+   This is a HAR artifact, distinct from parser.yaml `encoding: base64`
+   (which is a runtime loader concern).
+
+2. **Content-Type sniffing.** Some modems serve JSON with
+   `Content-Type: text/html` (e.g., coda56) or misspelled headers
+   (e.g., `applation/json`). Before the Content-Type dispatch:
+   - If the header contains `json` (any spelling), treat as JSON.
+   - Otherwise, if the body starts with `{` or `[`, attempt JSON
+     parse. If valid, treat as JSON. If invalid, fall through to the
+     Content-Type-based branch (HTML parsing still runs).
+   - Top-level JSON arrays are wrapped as `{"_raw": [...]}` to match
+     the runtime loader convention.
+
 ```text
-Response body analysis (Content-Type first):
-  ├── application/json ?
+Response body analysis (sniff-then-Content-Type):
+  ├── Body is valid JSON (regardless of Content-Type)?
   │   └── format: json
+  │       Top-level arrays wrapped as {"_raw": [...]}
   │       Detect: array_path and field key names from JSON structure
   │
   ├── application/xml or text/xml ?
   │   └── format: xml — not yet supported, flag for human review
   │
-  ├── text/html ?
+  ├── text/html (and not valid JSON)?
   │   ├── Contains <table> elements with channel data?
   │   │   ├── Rows are channels (each row = one channel)?
   │   │   │   └── format: table
@@ -390,6 +409,16 @@ Response body analysis (Content-Type first):
   │
   └── Ambiguous → flag for human review
 ```
+
+**JSON direction inference.** After format classification, JSON pages
+need direction assignment (downstream vs upstream). The pipeline scans:
+
+1. Resource path (e.g., `/dsinfo.asp` → downstream)
+2. Top-level JSON keys (e.g., `{"downstream": [...]}`)
+3. Nested keys up to 3 levels deep (e.g., `{"docsis": {"dschannel": [...]}}`)
+
+Short-form prefixes `ds`/`us` are matched on nested keys to handle
+modems like the G54 that use `dschannel`/`uschannel`.
 
 **Per-section format is the norm.** A single modem often uses `table`
 for downstream/upstream and `html_fields` for system_info, because

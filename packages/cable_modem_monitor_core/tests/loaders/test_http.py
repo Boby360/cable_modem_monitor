@@ -389,7 +389,9 @@ class TestHTTPResourceLoader:
         paths = [f[0] for f in loader.resource_fetches]
         assert "/status.html" in paths
         assert "/info.html" in paths
-        # Each tuple is (path, duration_ms, size_bytes)
-        for _path, duration_ms, size_bytes in loader.resource_fetches:
+        # Each tuple is (path, duration_ms, size_bytes, status_code, content_type)
+        for _path, duration_ms, size_bytes, status_code, content_type in loader.resource_fetches:
             assert duration_ms >= 0
             assert size_bytes > 0
+            assert status_code == 200
+            assert "text/html" in content_type

@@ -103,23 +103,52 @@ class TestModemSnapshot:
 
 
 class TestResourceFetch:
-    """ResourceFetch timing and size."""
+    """ResourceFetch timing, size, and response metadata."""
 
     def test_construction(self) -> None:
         fetch = ResourceFetch(path="/status.html", duration_ms=800.0, size_bytes=12480)
         assert fetch.path == "/status.html"
         assert fetch.duration_ms == 800.0
         assert fetch.size_bytes == 12480
+        assert fetch.status_code == 0
+        assert fetch.content_type == ""
+
+    def test_construction_with_response_metadata(self) -> None:
+        """ResourceFetch carries HTTP status code and Content-Type."""
+        fetch = ResourceFetch(
+            path="/status.html",
+            duration_ms=800.0,
+            size_bytes=12480,
+            status_code=200,
+            content_type="text/html",
+        )
+        assert fetch.status_code == 200
+        assert fetch.content_type == "text/html"
 
     def test_to_dict(self) -> None:
         """to_dict returns all fields as a plain dict."""
-        fetch = ResourceFetch(path="/status.html", duration_ms=800.0, size_bytes=12480)
+        fetch = ResourceFetch(
+            path="/status.html",
+            duration_ms=800.0,
+            size_bytes=12480,
+            status_code=200,
+            content_type="text/html; charset=utf-8",
+        )
         result = fetch.to_dict()
         assert result == {
             "path": "/status.html",
             "duration_ms": 800.0,
             "size_bytes": 12480,
+            "status_code": 200,
+            "content_type": "text/html; charset=utf-8",
         }
+
+    def test_to_dict_defaults(self) -> None:
+        """to_dict includes default status_code and content_type."""
+        fetch = ResourceFetch(path="/status.html", duration_ms=800.0, size_bytes=12480)
+        result = fetch.to_dict()
+        assert result["status_code"] == 0
+        assert result["content_type"] == ""
 
 
 class TestHealthInfo:
@@ -154,6 +183,7 @@ class TestOrchestratorDiagnostics:
         )
         assert metrics.resource_fetches == []
         assert metrics.last_poll_timestamp is None
+        assert metrics.auth_strategy == ""
 
     def test_after_successful_poll(self) -> None:
         """Metrics after a successful collection."""
@@ -186,6 +216,7 @@ class TestOrchestratorDiagnostics:
             "auth_failure_streak": 0,
             "circuit_breaker_open": False,
             "session_is_valid": False,
+            "auth_strategy": "",
             "connectivity_streak": 0,
             "connectivity_backoff_remaining": 0,
             "resource_fetches": [],
@@ -195,14 +226,15 @@ class TestOrchestratorDiagnostics:
     def test_to_dict_with_fetches(self) -> None:
         """to_dict serializes nested ResourceFetch objects."""
         fetches = [
-            ResourceFetch("/status.html", 800.0, 12480),
-            ResourceFetch("/info.html", 1200.0, 8192),
+            ResourceFetch("/status.html", 800.0, 12480, 200, "text/html"),
+            ResourceFetch("/info.html", 1200.0, 8192, 200, "text/html"),
         ]
         metrics = OrchestratorDiagnostics(
             poll_duration=2.5,
             auth_failure_streak=1,
             circuit_breaker_open=False,
             session_is_valid=True,
+            auth_strategy="form",
             connectivity_streak=3,
             connectivity_backoff_remaining=2,
             resource_fetches=fetches,
@@ -211,6 +243,7 @@ class TestOrchestratorDiagnostics:
         result = metrics.to_dict()
         assert result["poll_duration"] == 2.5
         assert result["auth_failure_streak"] == 1
+        assert result["auth_strategy"] == "form"
         assert result["connectivity_streak"] == 3
         assert result["connectivity_backoff_remaining"] == 2
         assert result["last_poll_timestamp"] == 1234567.89
@@ -219,6 +252,8 @@ class TestOrchestratorDiagnostics:
             "path": "/status.html",
             "duration_ms": 800.0,
             "size_bytes": 12480,
+            "status_code": 200,
+            "content_type": "text/html",
         }
 
 

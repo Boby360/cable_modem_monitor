@@ -108,7 +108,7 @@ class SystemInfoFieldDetail:
 
     field: str
     type: str = "string"
-    selector_type: str = ""  # "label" or "id"
+    selector_type: str = ""  # "label", "id", or "css_pattern"
     selector_value: str = ""
     source: str = ""  # HNAP/JSON source key
     pattern: str = ""
@@ -120,6 +120,8 @@ class SystemInfoFieldDetail:
             result["label"] = self.selector_value
         elif self.selector_type == "id":
             result["id"] = self.selector_value
+        elif self.selector_type == "css_pattern":
+            result["css"] = self.selector_value
         elif self.source:
             result["source"] = self.source
         if self.pattern:

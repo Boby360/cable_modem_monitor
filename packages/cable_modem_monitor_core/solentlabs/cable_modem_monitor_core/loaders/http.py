@@ -70,7 +70,7 @@ class HTTPResourceLoader:
         self._token_prefix = token_prefix
         self._detect_login_pages = detect_login_pages
         self._model = model
-        self.resource_fetches: list[tuple[str, float, int]] = []
+        self.resource_fetches: list[tuple[str, float, int, int, str]] = []
 
     def fetch(
         self,
@@ -140,7 +140,16 @@ class HTTPResourceLoader:
                 len(response.content),
                 elapsed_ms,
             )
-            self.resource_fetches.append((target.path, round(elapsed_ms, 1), len(response.content)))
+            content_type = response.headers.get("Content-Type", "")
+            self.resource_fetches.append(
+                (
+                    target.path,
+                    round(elapsed_ms, 1),
+                    len(response.content),
+                    response.status_code,
+                    content_type,
+                )
+            )
 
             if response.status_code in (401, 403):
                 raise ResourceLoadError(

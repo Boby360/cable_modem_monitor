@@ -8,6 +8,8 @@ Per docs/ONBOARDING_SPEC.md Phase 5 (HTTP transport).
 
 from __future__ import annotations
 
+import base64
+import contextlib
 import json as json_mod
 import re
 from typing import Any
@@ -105,13 +107,16 @@ def analyze_page(entry: dict[str, Any]) -> PageAnalysis:
     url = req.get("url", "")
     resource = path_from_url(url)
     content_type = _extract_content_type(resp)
-    body = resp.get("content", {}).get("text", "")
+    body = _decode_har_body(resp)
 
     page = PageAnalysis(resource=resource, content_type=content_type)
 
-    if "application/json" in content_type:
+    if _looks_like_json(content_type, body):
         page.json_data = _parse_json_body(body)
-    elif "text/html" in content_type:
+
+    # Fall through to HTML parsing when JSON sniffing matched but
+    # parsing failed (body started with { or [ but wasn't valid JSON).
+    if page.json_data is None and "text/html" in content_type:
         page.tables = detect_tables(body)
         page.js_functions = _detect_js_functions(body)
         page.label_pairs = detect_label_pairs(body)
@@ -205,14 +210,47 @@ def _detect_delimiter(raw_value: str) -> str:
 # -----------------------------------------------------------------------
 
 
+def _decode_har_body(resp: dict[str, Any]) -> str:
+    """Extract and decode response body from HAR content object.
+
+    Handles base64-encoded bodies (``content.encoding == "base64"``),
+    which some modems produce (e.g., dm1000).
+    """
+    content = resp.get("content", {})
+    body: str = content.get("text", "")
+    if content.get("encoding") == "base64" and body:
+        with contextlib.suppress(Exception):
+            body = base64.b64decode(body).decode("utf-8", errors="replace")
+    return body
+
+
+def _looks_like_json(content_type: str, body: str) -> bool:
+    """Check if a response is JSON, even when Content-Type lies.
+
+    Matches explicit ``application/json`` Content-Type, handles
+    misspellings (e.g., ``applation/json``), and sniffs bodies
+    that start with ``[`` or ``{`` when served as ``text/html``.
+    """
+    if "json" in content_type:
+        return True
+    stripped = body.lstrip()
+    return bool(stripped and stripped[0] in ("{", "["))
+
+
 def _parse_json_body(body: str) -> dict[str, Any] | None:
-    """Parse a JSON response body, returning None on failure."""
+    """Parse a JSON response body, returning None on failure.
+
+    Top-level arrays are wrapped as ``{"_raw": [...]}`` to match
+    the runtime loader convention (see coda56 parser.yaml).
+    """
     if not body:
         return None
     try:
         data = json_mod.loads(body)
         if isinstance(data, dict):
             return data
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return {"_raw": data}
         return None
     except (json_mod.JSONDecodeError, TypeError):
         return None

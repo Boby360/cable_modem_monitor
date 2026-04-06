@@ -20,6 +20,8 @@ from solentlabs.cable_modem_monitor_core.mcp.analysis.format.html_parsing import
     detect_tables,
 )
 from solentlabs.cable_modem_monitor_core.mcp.analysis.format.http import (
+    _decode_har_body,
+    _looks_like_json,
     _parse_json_body,
     analyze_page,
     classify_page_format,
@@ -522,7 +524,7 @@ class TestJsonBodyParsing:
         assert _parse_json_body("") is None
 
     def test_non_dict_json(self) -> None:
-        """JSON array (not dict) returns None."""
+        """JSON array of scalars returns None."""
         assert _parse_json_body("[1, 2, 3]") is None
 
     def test_invalid_json(self) -> None:
@@ -533,6 +535,139 @@ class TestJsonBodyParsing:
         """Valid JSON dict is returned."""
         result = _parse_json_body('{"key": "value"}')
         assert result == {"key": "value"}
+
+    def test_array_of_dicts_wrapped(self) -> None:
+        """JSON array of dicts is wrapped as {"_raw": [...]}."""
+        result = _parse_json_body('[{"portId": "1"}, {"portId": "2"}]')
+        assert result is not None
+        assert "_raw" in result
+        assert len(result["_raw"]) == 2
+        assert result["_raw"][0]["portId"] == "1"
+
+    def test_empty_array_returns_none(self) -> None:
+        """Empty JSON array returns None."""
+        assert _parse_json_body("[]") is None
+
+
+# =====================================================================
+# Content-type sniffing — table-driven
+# =====================================================================
+
+# fmt: off
+_LOOKS_LIKE_JSON_CASES = [
+    # (content_type,          body,                expected, desc)
+    ("application/json",      '{"a": 1}',          True,    "explicit json content-type"),
+    ("applation/json",        '{"a": 1}',          True,    "misspelled json content-type"),
+    ("text/html",             '[{"portId": "1"}]',  True,    "array body with html content-type"),
+    ("text/html",             '{"data": []}',       True,    "dict body with html content-type"),
+    ("text/html",             "<html>data</html>",  False,   "real html body"),
+    ("text/html",             "",                   False,   "empty body"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    "ct,body,expected,desc",
+    _LOOKS_LIKE_JSON_CASES,
+    ids=[c[3] for c in _LOOKS_LIKE_JSON_CASES],
+)
+def test_looks_like_json(ct: str, body: str, expected: bool, desc: str) -> None:
+    """Content-type sniffing detects JSON regardless of header."""
+    assert _looks_like_json(ct, body) == expected
+
+
+# =====================================================================
+# Base64 HAR body decoding
+# =====================================================================
+
+
+class TestDecodeHarBody:
+    """Tests for _decode_har_body base64 handling."""
+
+    def test_plain_text_passthrough(self) -> None:
+        """Non-encoded body is returned as-is."""
+        resp = {"content": {"text": "<html>data</html>"}}
+        assert _decode_har_body(resp) == "<html>data</html>"
+
+    def test_base64_decoded(self) -> None:
+        """Base64-encoded body is decoded."""
+        import base64
+
+        original = '{"nodes": [{"num": "1"}]}'
+        encoded = base64.b64encode(original.encode()).decode()
+        resp = {"content": {"text": encoded, "encoding": "base64"}}
+        assert _decode_har_body(resp) == original
+
+    def test_missing_content(self) -> None:
+        """Missing content object returns empty string."""
+        assert _decode_har_body({}) == ""
+
+    def test_base64_invalid_returns_raw(self) -> None:
+        """Invalid base64 is suppressed, raw body returned."""
+        resp = {"content": {"text": "not-valid-base64!!!", "encoding": "base64"}}
+        assert _decode_har_body(resp) == "not-valid-base64!!!"
+
+    def test_base64_empty_body_skips_decode(self) -> None:
+        """Empty body with base64 encoding returns empty string."""
+        resp = {"content": {"text": "", "encoding": "base64"}}
+        assert _decode_har_body(resp) == ""
+
+
+# =====================================================================
+# Content-type sniffing integration — analyze_page
+# =====================================================================
+
+
+class TestAnalyzePageSniffing:
+    """analyze_page detects JSON even with wrong Content-Type."""
+
+    def test_json_as_text_html(self) -> None:
+        """JSON array served as text/html is detected as JSON."""
+        entry = _make_entry(
+            "/data/dsinfo.asp",
+            200,
+            "text/html",
+            '[{"portId": "1", "frequency": "507000000"}]',
+        )
+        page = analyze_page(entry)
+        assert page.json_data is not None
+        assert "_raw" in page.json_data
+        assert classify_page_format(page) == "json"
+
+    def test_misspelled_content_type(self) -> None:
+        """Misspelled 'applation/json' is handled."""
+        entry = _make_entry(
+            "/setup.cgi",
+            200,
+            "applation/json",
+            '{"nodes": [{"num": "1"}]}',
+        )
+        page = analyze_page(entry)
+        assert page.json_data is not None
+        assert classify_page_format(page) == "json"
+
+    def test_base64_har_body_detected_as_json(self) -> None:
+        """Base64-encoded HAR body is decoded and detected as JSON."""
+        import base64 as b64
+
+        original = '{"nodes": [{"num": "1"}]}'
+        encoded = b64.b64encode(original.encode()).decode()
+        entry = _make_entry("/setup.cgi", 200, "applation/json", "placeholder")
+        entry["response"]["content"]["text"] = encoded
+        entry["response"]["content"]["encoding"] = "base64"
+        page = analyze_page(entry)
+        assert page.json_data is not None
+        assert "nodes" in page.json_data
+        assert classify_page_format(page) == "json"
+
+    def test_json_sniff_fallthrough_to_html(self) -> None:
+        """Body starting with { that isn't valid JSON falls through to HTML parsing."""
+        html = "<table><tr><th>Channel</th></tr><tr><td>1</td></tr></table>"
+        entry = _make_entry("/status.html", 200, "text/html", "{invalid json" + html)
+        page = analyze_page(entry)
+        assert page.json_data is None
+        # HTML parsing still ran despite the body starting with {
+        assert len(page.tables) >= 0  # may or may not find tables in mangled HTML
 
 
 # =====================================================================

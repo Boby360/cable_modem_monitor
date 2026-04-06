@@ -58,7 +58,7 @@ class HNAPLoader:
         self._private_key = private_key
         self._hmac_algorithm = hmac_algorithm
         self._timeout = timeout
-        self.resource_fetches: list[tuple[str, float, int]] = []
+        self.resource_fetches: list[tuple[str, float, int, int, str]] = []
 
     def fetch(self, parser_config: ParserConfig) -> dict[str, Any]:
         """Fetch all HNAP actions and return the resource dict.
@@ -118,7 +118,16 @@ class HNAPLoader:
             len(response.content),
             elapsed_ms,
         )
-        self.resource_fetches.append((HNAP_ENDPOINT, round(elapsed_ms, 1), len(response.content)))
+        content_type = response.headers.get("Content-Type", "")
+        self.resource_fetches.append(
+            (
+                HNAP_ENDPOINT,
+                round(elapsed_ms, 1),
+                len(response.content),
+                response.status_code,
+                content_type,
+            )
+        )
 
         if response.status_code == 401:
             raise HNAPLoadError(

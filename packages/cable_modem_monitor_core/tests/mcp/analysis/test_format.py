@@ -115,11 +115,19 @@ def test_direction_from_resource(resource: str, expected: str, desc: str) -> Non
 
 
 # fmt: off
-JSON_DIRECTION_CASES: list[tuple[dict[str, list[object]], str, str]] = [
+JSON_DIRECTION_CASES: list[tuple[dict[str, Any], str, str]] = [
     # (data,                              expected,      desc)
     ({"downstream": []},                  "downstream",  "downstream key"),
     ({"upstream": []},                    "upstream",    "upstream key"),
     ({"channels": []},                    "unknown",     "no direction key"),
+    ({"docsis": {"dschannel": []}},       "downstream",  "nested ds prefix"),
+    ({"docsis": {"uschannel": []}},       "upstream",    "nested us prefix"),
+    ({"wan": {"status": {}}},             "unknown",     "nested no direction"),
+    ({"a": {"b": {"c": {"d": {"dschannel": []}}}}}, "unknown", "depth limit exceeded"),
+    ({"user": "admin", "data": []},      "unknown",     "us prefix false positive rejected"),
+    ({"usage": 100},                     "unknown",     "us prefix english word rejected"),
+    ({"docsis": {"us_power": []}},       "upstream",    "nested us_power matches"),
+    ({"dsData": []},                     "downstream",  "camelCase ds prefix matches"),
 ]
 # fmt: on
 

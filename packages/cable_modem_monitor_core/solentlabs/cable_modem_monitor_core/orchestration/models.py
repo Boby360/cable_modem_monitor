@@ -83,11 +83,16 @@ class ResourceFetch:
         path: Resource path (e.g., "/status.html").
         duration_ms: Fetch time in milliseconds.
         size_bytes: Response body size in bytes.
+        status_code: HTTP response status code (e.g., 200, 401).
+        content_type: Response Content-Type header value. Empty string
+            when the header is absent or not applicable.
     """
 
     path: str
     duration_ms: float
     size_bytes: int
+    status_code: int = 0
+    content_type: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict for diagnostics output."""
@@ -95,6 +100,8 @@ class ResourceFetch:
             "path": self.path,
             "duration_ms": self.duration_ms,
             "size_bytes": self.size_bytes,
+            "status_code": self.status_code,
+            "content_type": self.content_type,
         }
 
 
@@ -169,6 +176,8 @@ class OrchestratorDiagnostics:
         circuit_breaker_open: Whether polling is stopped due to
             persistent auth failures.
         session_is_valid: Current session state from the collector.
+        auth_strategy: Auth strategy name from modem config (e.g.,
+            "form", "hnap", "none"). Empty string if unknown.
         connectivity_streak: Consecutive connectivity failures. 0 when
             reachable.
         connectivity_backoff_remaining: Polls to skip before next
@@ -183,6 +192,7 @@ class OrchestratorDiagnostics:
     auth_failure_streak: int
     circuit_breaker_open: bool
     session_is_valid: bool
+    auth_strategy: str = ""
     connectivity_streak: int = 0
     connectivity_backoff_remaining: int = 0
     resource_fetches: list[ResourceFetch] = field(default_factory=list)
@@ -195,6 +205,7 @@ class OrchestratorDiagnostics:
             "auth_failure_streak": self.auth_failure_streak,
             "circuit_breaker_open": self.circuit_breaker_open,
             "session_is_valid": self.session_is_valid,
+            "auth_strategy": self.auth_strategy,
             "connectivity_streak": self.connectivity_streak,
             "connectivity_backoff_remaining": self.connectivity_backoff_remaining,
             "resource_fetches": [f.to_dict() for f in self.resource_fetches],

@@ -59,7 +59,7 @@ class CBNLoader:
         self._cookie_name = session_cookie_name
         self._timeout = timeout
         self._model = model
-        self.resource_fetches: list[tuple[str, float, int]] = []
+        self.resource_fetches: list[tuple[str, float, int, int, str]] = []
 
     def fetch(
         self,
@@ -137,7 +137,16 @@ class CBNLoader:
             elapsed_ms,
             len(response.content),
         )
-        self.resource_fetches.append((fun, round(elapsed_ms, 1), len(response.content)))
+        content_type = response.headers.get("Content-Type", "")
+        self.resource_fetches.append(
+            (
+                fun,
+                round(elapsed_ms, 1),
+                len(response.content),
+                response.status_code,
+                content_type,
+            )
+        )
 
         try:
             element: Element = DefusedET.fromstring(response.text)

@@ -535,7 +535,16 @@ def _should_detect_login_pages(modem_config: Any) -> bool:
 
 
 def _to_resource_fetches(
-    raw: list[tuple[str, float, int]],
+    raw: list[tuple[str, float, int, int, str]],
 ) -> list[ResourceFetch]:
     """Convert loader timing tuples to ResourceFetch objects."""
-    return [ResourceFetch(path=r[0], duration_ms=r[1], size_bytes=r[2]) for r in raw]
+    return [
+        ResourceFetch(
+            path=r[0],
+            duration_ms=r[1],
+            size_bytes=r[2],
+            status_code=r[3],
+            content_type=r[4],
+        )
+        for r in raw
+    ]

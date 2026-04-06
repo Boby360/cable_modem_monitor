@@ -93,11 +93,13 @@ def _build_auth_block(
     for key, value in auth.get("fields", {}).items():
         result[key] = value
 
-    # Move cookie_name and token_prefix from session to auth
+    # Move cookie_name and token_prefix from session to auth.
+    # Strategy-aware: form_cbn uses session_cookie_name (not cookie_name),
+    # none/hnap have no cookie field, token_prefix is url_token only.
     if session_data:
-        if session_data.get("cookie_name"):
+        if strategy not in ("none", "hnap", "form_cbn") and session_data.get("cookie_name"):
             result["cookie_name"] = session_data["cookie_name"]
-        if session_data.get("token_prefix"):
+        if strategy == "url_token" and session_data.get("token_prefix"):
             result["token_prefix"] = session_data["token_prefix"]
 
     _clean_auth_defaults(result)

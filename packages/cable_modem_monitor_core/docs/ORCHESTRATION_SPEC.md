@@ -635,11 +635,17 @@ class ResourceFetch:
         path: Resource path (e.g., "/status.html").
         duration_ms: Fetch time in milliseconds.
         size_bytes: Response body size in bytes.
+        status_code: HTTP response status code (e.g., 200, 401).
+        content_type: Response Content-Type header value. Empty string
+            when the header is absent or not applicable (e.g., HNAP
+            batch responses where the Content-Type is always JSON).
     """
 
     path: str
     duration_ms: float
     size_bytes: int
+    status_code: int = 0
+    content_type: str = ""
 
 
 @dataclass
@@ -656,6 +662,8 @@ class OrchestratorDiagnostics:
         circuit_breaker_open: Whether polling is stopped due to
             persistent auth failures.
         session_is_valid: Current session state from the collector.
+        auth_strategy: Auth strategy name from modem config (e.g.,
+            "form", "hnap", "none"). Empty string if unknown.
         connectivity_streak: Consecutive connectivity failures. 0 when
             reachable.
         connectivity_backoff_remaining: Polls to skip before next
@@ -672,6 +680,7 @@ class OrchestratorDiagnostics:
     auth_failure_streak: int
     circuit_breaker_open: bool
     session_is_valid: bool
+    auth_strategy: str = ""
     connectivity_streak: int = 0
     connectivity_backoff_remaining: int = 0
     resource_fetches: list[ResourceFetch] = field(default_factory=list)

@@ -249,11 +249,63 @@ def _direction_from_resource(resource: str) -> str:
 
 
 def _direction_from_json(data: dict[str, Any]) -> str:
-    """Infer downstream/upstream from JSON structure keys."""
-    for key in data:
-        lower = key.lower()
-        if "downstream" in lower:
-            return "downstream"
-        if "upstream" in lower:
-            return "upstream"
+    """Infer downstream/upstream from JSON structure keys.
+
+    Scans top-level and nested keys to handle modems like the G54
+    that nest channels under ``docsis.dschannel``, ``docsis.uschannel``.
+    """
+    if _scan_keys_for_direction(data, "downstream", ("ds",)):
+        return "downstream"
+    if _scan_keys_for_direction(data, "upstream", ("us",)):
+        return "upstream"
     return "unknown"
+
+
+def _scan_keys_for_direction(
+    data: dict[str, Any],
+    full_name: str,
+    prefixes: tuple[str, ...],
+    depth: int = 0,
+) -> bool:
+    """Recursively scan JSON keys for direction indicators."""
+    if depth > 3:
+        return False
+    for key, value in data.items():
+        lower = key.lower()
+        if full_name in lower:
+            return True
+        if _has_direction_prefix(lower, prefixes):
+            return True
+        if isinstance(value, dict) and _scan_keys_for_direction(value, full_name, prefixes, depth + 1):
+            return True
+    return False
+
+
+# Common English words starting with "us" or "ds" that are NOT
+# direction indicators.  Checked before prefix matching to avoid
+# false positives like "user" → upstream.
+_NON_DIRECTION_WORDS = frozenset(
+    {
+        "user",
+        "username",
+        "usage",
+        "used",
+        "usable",
+        "usual",
+        "usually",
+        "dst",
+    }
+)
+
+
+def _has_direction_prefix(key: str, prefixes: tuple[str, ...]) -> bool:
+    """Check if a key starts with a direction prefix.
+
+    Matches DOCSIS compound words like ``dschannel``, ``ds_power``,
+    ``dsChannel`` but NOT common English words like ``user``,
+    ``username``, ``usage`` (which start with ``us`` but are not
+    direction indicators).
+    """
+    if key in _NON_DIRECTION_WORDS:
+        return False
+    return any(key.startswith(p) and len(key) > len(p) for p in prefixes)

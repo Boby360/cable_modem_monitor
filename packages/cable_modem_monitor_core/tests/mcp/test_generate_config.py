@@ -128,6 +128,25 @@ class TestSessionBehavior:
         assert modem["auth"]["cookie_name"] == "sessionId"
         assert modem["auth"]["token_prefix"] == "ct_"
 
+    def test_form_cbn_no_cookie_name(self) -> None:
+        """form_cbn auth must not receive cookie_name (uses session_cookie_name)."""
+        fixture = load_fixture(self._find_fixture("form_cbn_no_cookie_copy"))
+        result = generate_config(fixture["_analysis"], fixture["_metadata"])
+        modem = yaml.safe_load(result.modem_yaml)
+        assert modem["auth"]["strategy"] == "form_cbn"
+        assert "cookie_name" not in modem["auth"]
+
+    def test_form_auth_no_token_prefix(self) -> None:
+        """form auth must not receive token_prefix (url_token only)."""
+        fixture = load_fixture(self._find_fixture("table_form_auth"))
+        analysis = dict(fixture["_analysis"])
+        analysis["session"] = dict(analysis["session"])
+        analysis["session"]["token_prefix"] = "ct_"
+        result = generate_config(analysis, fixture["_metadata"])
+        modem = yaml.safe_load(result.modem_yaml)
+        assert modem["auth"]["strategy"] == "form"
+        assert "token_prefix" not in modem["auth"]
+
 
 # ---------------------------------------------------------------------------
 # Spot-check: actions

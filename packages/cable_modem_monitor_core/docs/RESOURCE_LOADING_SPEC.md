@@ -436,21 +436,27 @@ strictly sequential due to token rotation — no parallel fetching.
 
 ### Per-Resource Timing
 
-The loader captures wall-clock time and response size for each HTTP
-request, returned alongside the resource dict as a list of
-`ResourceFetch` objects (see `ORCHESTRATION_SPEC.md` § Data Models):
+The loader captures wall-clock time, response size, HTTP status code,
+and Content-Type for each HTTP request, returned alongside the resource
+dict as a list of `ResourceFetch` objects (see `ORCHESTRATION_SPEC.md`
+§ Data Models):
 
 ```python
 resource_fetches: list[ResourceFetch]
-# e.g., [ResourceFetch("/status.html", 800.0, 12480),
-#         ResourceFetch("/info.html", 1200.0, 8192)]
-# HNAP: [ResourceFetch("GetMultipleHNAPs", 1100.0, 24576)]
+# e.g., [ResourceFetch("/status.html", 800.0, 12480, 200, "text/html"),
+#         ResourceFetch("/info.html", 1200.0, 8192, 200, "text/html")]
+# HNAP: [ResourceFetch("GetMultipleHNAPs", 1100.0, 24576, 200, "text/xml")]
 ```
 
-Units are milliseconds for `duration_ms` and bytes for `size_bytes`.
-The orchestrator stores these on `OrchestratorDiagnostics.resource_fetches`
-from the last successful collection. Consumers convert to display
-units as needed.
+Fields: `path`, `duration_ms` (milliseconds), `size_bytes`,
+`status_code`, `content_type` (from response Content-Type header,
+empty when absent). The orchestrator stores these on
+`OrchestratorDiagnostics.resource_fetches` from the last successful
+collection.
+
+`status_code` and `content_type` enable remote diagnosis of format
+mismatches (JSON served as `text/html`) and auth issues (unexpected
+401/403 on data pages) without requiring a new HAR capture.
 
 Each fetch is logged at DEBUG with its elapsed time:
 
@@ -460,7 +466,7 @@ DEBUG "Resource loaded: /info.html (1200ms, 8.0KB)"
 ```
 
 This data is diagnostic — useful for identifying slow resources,
-tracking latency trends, and troubleshooting timeout issues.
+tracking latency trends, and troubleshooting format or auth issues.
 
 Page deduplication keeps the request count at the number of unique paths,
 not the number of semantic names. A modem with 5 semantic names pointing

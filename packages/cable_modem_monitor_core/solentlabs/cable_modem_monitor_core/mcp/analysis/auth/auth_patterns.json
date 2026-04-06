@@ -27,6 +27,8 @@
     "sid",
     "uid",
     "token",
-    "auth"
+    "auth",
+    "credential",
+    "sec"
   ]
 }

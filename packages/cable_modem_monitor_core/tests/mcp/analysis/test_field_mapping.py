@@ -858,6 +858,21 @@ class TestMappingTypeSerialization:
         assert d["id"] == "systemuptime"
         assert "label" not in d
 
+    def test_system_info_field_css_pattern_selector(self) -> None:
+        """SystemInfoFieldDetail.to_dict() uses 'css' key for css_pattern selector."""
+        f = SystemInfoFieldDetail(
+            field="hardware_version",
+            type="string",
+            selector_type="css_pattern",
+            selector_value="td",
+            pattern=r"Hardware Version:\s*([^<\n]+)",
+        )
+        d = f.to_dict()
+        assert d["css"] == "td"
+        assert d["pattern"] == r"Hardware Version:\s*([^<\n]+)"
+        assert "label" not in d
+        assert "id" not in d
+
     def test_system_info_field_source_key(self) -> None:
         """SystemInfoFieldDetail.to_dict() uses 'source' key for JSON."""
         f = SystemInfoFieldDetail(

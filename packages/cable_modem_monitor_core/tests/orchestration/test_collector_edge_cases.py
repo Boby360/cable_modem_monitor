@@ -224,7 +224,7 @@ class TestHnapResourceLoading:
         with patch("solentlabs.cable_modem_monitor_core.loaders.hnap.HNAPLoader") as mock_loader_cls:
             mock_loader = MagicMock()
             mock_loader.fetch.return_value = {"hnap_data": "ok"}
-            mock_loader.resource_fetches = [("/HNAP1/", 50.0, 1024)]
+            mock_loader.resource_fetches = [("/HNAP1/", 50.0, 1024, 200, "text/xml")]
             mock_loader_cls.return_value = mock_loader
 
             resources, fetches = collector._load_hnap_resources()

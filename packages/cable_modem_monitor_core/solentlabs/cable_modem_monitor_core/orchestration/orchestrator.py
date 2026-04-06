@@ -236,11 +236,13 @@ class Orchestrator:
 
         No side effects — safe to call at any time.
         """
+        auth = self._modem_config.auth
         return OrchestratorDiagnostics(
             poll_duration=self._last_poll_duration,
             auth_failure_streak=self._policy.auth_failure_streak,
             circuit_breaker_open=self._policy.circuit_open,
             session_is_valid=self._collector.session_is_valid,
+            auth_strategy=auth.strategy if auth else "",
             connectivity_streak=self._policy.connectivity_streak,
             connectivity_backoff_remaining=self._policy.connectivity_backoff_remaining,
             resource_fetches=self._collector.last_resource_fetches,

@@ -163,6 +163,8 @@ COOKIE_NAME_CASES = [
     ("mySessionId",  True,  "substring match"),
     ("uid",          True,  "HNAP uid"),
     ("token_data",   True,  "token substring"),
+    ("credential",   True,  "Arris form auth cookie"),
+    ("sec",          True,  "CGA2121 session cookie"),
     ("preferences",  False, "not session-related"),
     ("theme",        False, "not session-related"),
 ]
