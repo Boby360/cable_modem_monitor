@@ -24,6 +24,7 @@ from .html_parsing import detect_label_pairs, detect_tables
 from .table_analysis import is_channel_table, is_transposed
 from .types import (
     DetectedJsFunction,
+    DetectedJsJsonVariable,
     PageAnalysis,
 )
 
@@ -49,6 +50,12 @@ _JS_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 
 # Common JS delimiters
 _JS_DELIMITERS: tuple[str, ...] = ("|", ",", ";", "^")
+
+# JS variable assignment containing a JSON array: name = [{...}, ...]
+_JS_JSON_VAR_PATTERN = re.compile(
+    r"(\w+)\s*=\s*(\[.*?\])\s*;",
+    re.DOTALL,
+)
 
 
 # -----------------------------------------------------------------------
@@ -119,6 +126,7 @@ def analyze_page(entry: dict[str, Any]) -> PageAnalysis:
     if page.json_data is None and "text/html" in content_type:
         page.tables = detect_tables(body)
         page.js_functions = _detect_js_functions(body)
+        page.js_json_variables = _detect_js_json_variables(body)
         page.label_pairs = detect_label_pairs(body)
 
     return page
@@ -127,11 +135,14 @@ def analyze_page(entry: dict[str, Any]) -> PageAnalysis:
 def classify_page_format(page: PageAnalysis) -> str:
     """Classify the primary data format of a page.
 
-    Returns one of: json, javascript, table, table_transposed,
-    html_fields, or unknown.
+    Returns one of: json, javascript_json, javascript, table,
+    table_transposed, html_fields, or unknown.
     """
     if page.json_data is not None:
         return "json"
+
+    if page.js_json_variables:
+        return "javascript_json"
 
     if page.js_functions:
         return "javascript"
@@ -193,6 +204,32 @@ def _detect_js_functions(body: str) -> list[DetectedJsFunction]:
         )
 
     return functions
+
+
+def _detect_js_json_variables(body: str) -> list[DetectedJsJsonVariable]:
+    """Detect JS variable assignments containing JSON arrays.
+
+    Finds patterns like ``json_dsData = [{...}, ...]`` in
+    ``<script>`` blocks.  Only includes variables whose value
+    parses as a JSON array of dicts with 2+ keys (channel objects).
+    """
+    variables: list[DetectedJsJsonVariable] = []
+
+    for match in _JS_JSON_VAR_PATTERN.finditer(body):
+        name = match.group(1)
+        raw_json = match.group(2)
+
+        try:
+            data = json_mod.loads(raw_json)
+        except (json_mod.JSONDecodeError, ValueError):
+            continue
+
+        if not isinstance(data, list) or not data or not isinstance(data[0], dict) or len(data[0]) < 2:
+            continue
+
+        variables.append(DetectedJsJsonVariable(name=name, data=data))
+
+    return variables
 
 
 def _detect_delimiter(raw_value: str) -> str:

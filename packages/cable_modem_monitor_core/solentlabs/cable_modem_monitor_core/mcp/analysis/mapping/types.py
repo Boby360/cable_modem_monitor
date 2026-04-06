@@ -73,6 +73,7 @@ class SectionDetail:
     delimiter: str = ""
     fields_per_record: int = 0
     array_path: str = ""
+    variable: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to the sections output format."""
@@ -81,24 +82,22 @@ class SectionDetail:
             "resource": self.resource,
             "mappings": [m.to_dict() for m in self.mappings],
         }
-        if self.selector:
-            result["selector"] = self.selector
-        if self.row_start:
-            result["row_start"] = self.row_start
-        if self.channel_type is not None:
-            result["channel_type"] = self.channel_type
-        if self.filter is not None:
-            result["filter"] = self.filter
-        if self.channel_count:
-            result["channel_count"] = self.channel_count
-        if self.function_name:
-            result["function_name"] = self.function_name
-        if self.delimiter:
-            result["delimiter"] = self.delimiter
-        if self.fields_per_record:
-            result["fields_per_record"] = self.fields_per_record
-        if self.array_path:
-            result["array_path"] = self.array_path
+        # Optional fields — only emitted when non-default.
+        _optional: list[tuple[str, Any]] = [
+            ("selector", self.selector),
+            ("row_start", self.row_start),
+            ("channel_type", self.channel_type),
+            ("filter", self.filter),
+            ("channel_count", self.channel_count),
+            ("function_name", self.function_name),
+            ("delimiter", self.delimiter),
+            ("fields_per_record", self.fields_per_record),
+            ("array_path", self.array_path),
+            ("variable", self.variable),
+        ]
+        for key, value in _optional:
+            if value:
+                result[key] = value
         return result
 
 

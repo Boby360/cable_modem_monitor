@@ -92,6 +92,7 @@ but modem-specific behavior comes from config, not from Core code.
 | ABCs / base classes | `BaseParser`, `BaseAuthStrategy` |
 | Action executors | `orchestration/actions/` — transport-scoped executors (`http_action`, `hnap_action`, `cbn_action`) with single `execute_action()` dispatch. `ActionResult` return type. |
 | Protocol primitives | `protocol/hnap` — shared HNAP constants and HMAC signing. `protocol/cbn` — shared CBN_Encrypt (AES-256-CBC) used by `form_cbn` auth. |
+| Auth shared helpers | `auth/response` — JSON response parsing (double-decode, type check, diagnostics) shared by `form_sjcl`, `form_pbkdf2`, `hnap`. |
 | Parser coordinator | `ModemParserCoordinator` — factory + orchestration: parser.yaml → `BaseParser` instances → parser.py chaining → `ModemData` |
 | Auth strategies | `none`, `basic`, `form`, `form_nonce`, `form_pbkdf2`, `form_sjcl`, `hnap`, `url_token`, `form_cbn` |
 | Resource loaders | HTTP → `BeautifulSoup` or `dict` (format-dependent), HNAP → JSON, CBN → `Element` |

@@ -105,6 +105,8 @@ def _assemble_channel_sections(
 
         if fmt == "json":
             _assemble_json_sections(page, sections, warnings)
+        elif fmt == "javascript_json":
+            _assemble_js_json_sections(page, sections, warnings)
         elif fmt == "javascript":
             _assemble_js_sections(page, sections, warnings)
         elif fmt in ("table", "table_transposed"):
@@ -192,6 +194,55 @@ def _assemble_js_sections(
             continue
 
         sections[direction] = section.to_dict()
+
+
+def _assemble_js_json_sections(
+    page: PageAnalysis,
+    sections: dict[str, Any],
+    warnings: list[str],
+) -> None:
+    """Assemble channel sections from JS-embedded JSON arrays.
+
+    Each detected variable (e.g., ``json_dsData``, ``json_usData``)
+    becomes a section.  Direction is inferred from the variable name
+    or from the JSON key structure.
+    """
+    from ...validation.har_utils import WARNING_PREFIX
+
+    for js_var in page.js_json_variables:
+        # Wrap as dict so extract_section_mappings can find the array
+        json_data = {"_raw": js_var.data}
+
+        section = extract_section_mappings(
+            fmt="json",
+            json_data=json_data,
+            resource=page.resource,
+            warnings=warnings,
+        )
+
+        if section is None:
+            continue
+
+        # Override format to javascript_json in the output
+        section.format = "javascript_json"
+        section.variable = js_var.name
+
+        # Infer direction from variable name, then resource path
+        direction = _direction_from_js_name(js_var.name)
+        if direction == "unknown":
+            direction = _direction_from_resource(page.resource)
+        if direction == "unknown":
+            direction = _direction_from_json(json_data)
+
+        if direction == "unknown":
+            warnings.append(
+                f"{WARNING_PREFIX} Cannot determine direction for JS JSON variable "
+                f"'{js_var.name}' on {page.resource}. Manual review required."
+            )
+            continue
+
+        if direction not in sections:
+            sections[direction] = section.to_dict()
 
 
 def _assemble_json_sections(

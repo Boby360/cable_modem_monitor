@@ -40,6 +40,18 @@ class DetectedJsFunction:
 
 
 @dataclass
+class DetectedJsJsonVariable:
+    """A JavaScript variable holding a JSON array of channel objects.
+
+    Found in ``<script>`` tags as ``variableName = [{...}, ...]``.
+    Used by the ``javascript_json`` format (e.g., TG3442DE).
+    """
+
+    name: str
+    data: list[dict[str, Any]]
+
+
+@dataclass
 class DetectedLabelPair:
     """A label-value pair found in HTML content."""
 
@@ -58,5 +70,6 @@ class PageAnalysis:
     content_type: str
     tables: list[DetectedTable] = field(default_factory=list)
     js_functions: list[DetectedJsFunction] = field(default_factory=list)
+    js_json_variables: list[DetectedJsJsonVariable] = field(default_factory=list)
     label_pairs: list[DetectedLabelPair] = field(default_factory=list)
     json_data: dict[str, Any] | None = None

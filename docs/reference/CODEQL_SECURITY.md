@@ -105,8 +105,8 @@ bash scripts/dev/test-codeql.sh
 
 ## Related Documentation
 
-- [CodeQL Overview](.github/codeql/README.md)
-- [Query Documentation](.github/codeql/queries/README.md)
+- [CodeQL Overview](../../.github/codeql/README.md)
+- [Query Documentation](../../.github/codeql/queries/)
 - [GitHub CodeQL Docs](https://codeql.github.com/docs/)
 
 ---

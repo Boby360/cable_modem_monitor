@@ -2,7 +2,7 @@
 
 How new modems go from a HAR capture to a tested catalog entry.
 
-> **Authoritative spec:** [ONBOARDING_SPEC.md](../packages/cable_modem_monitor_core/docs/ONBOARDING_SPEC.md)
+> **Authoritative spec:** [ONBOARDING_SPEC.md](../../cable_modem_monitor_core/docs/ONBOARDING_SPEC.md)
 > covers tool contracts, decision trees, validation rules, worked examples,
 > and error handling in full detail. This document is an overview.
 
@@ -83,7 +83,7 @@ The pipeline separates deterministic logic (repeatable, testable Python code) fr
 | Golden file generation | Parse HAR through config | Sanity-check channel counts |
 | Testing | HAR replay, golden file diff | Diagnose failures, fix config |
 
-See [ONBOARDING_SPEC.md § Tool boundaries](../packages/cable_modem_monitor_core/docs/ONBOARDING_SPEC.md#tool-boundaries) for the full responsibility matrix.
+See [ONBOARDING_SPEC.md § Tool boundaries](../../cable_modem_monitor_core/docs/ONBOARDING_SPEC.md#tool-boundaries) for the full responsibility matrix.
 
 ---
 
@@ -131,7 +131,7 @@ Both files live in Core (`solentlabs/cable_modem_monitor_core/mcp/analysis/`). E
 
 ## Further Reading
 
-- [ONBOARDING_SPEC.md](../packages/cable_modem_monitor_core/docs/ONBOARDING_SPEC.md) — full tool contracts, decision tree (7 phases), validation rules, worked examples, error handling
-- [MODEM_REQUEST.md](MODEM_REQUEST.md) — contributor guide for submitting HAR captures
-- [MODEM_YAML_SPEC.md](../packages/cable_modem_monitor_core/docs/MODEM_YAML_SPEC.md) — modem config schema and transport constraints
-- [PARSER_YAML_SPEC.md](../packages/cable_modem_monitor_core/docs/PARSER_YAML_SPEC.md) — parser config schema
+- [ONBOARDING_SPEC.md](../../cable_modem_monitor_core/docs/ONBOARDING_SPEC.md) — full tool contracts, decision tree (7 phases), validation rules, worked examples, error handling
+- [MODEM_REQUEST.md](../../../docs/MODEM_REQUEST.md) — contributor guide for submitting HAR captures
+- [MODEM_YAML_SPEC.md](../../cable_modem_monitor_core/docs/MODEM_YAML_SPEC.md) — modem config schema and transport constraints
+- [PARSING_SPEC.md](../../cable_modem_monitor_core/docs/PARSING_SPEC.md) — parser config schema

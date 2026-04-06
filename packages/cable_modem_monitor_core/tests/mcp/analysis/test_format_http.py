@@ -186,6 +186,39 @@ class TestJsDetection:
         assert page.js_functions[0].delimiter == "|"
 
 
+class TestJsJsonDetection:
+    """Tests for JavaScript JSON variable detection."""
+
+    def test_detects_js_json_variables(self) -> None:
+        """JS JSON variable assignments are detected."""
+        data = load_fixture(VALID_DIR / "javascript_json_embedded.json")
+        page = analyze_page(data["_entry"])
+        assert len(page.js_json_variables) >= 1
+        names = [v.name for v in page.js_json_variables]
+        for expected in data["_expected_js_json_variables"]:
+            assert expected in names
+
+    def test_js_json_data_parsed(self) -> None:
+        """JS JSON variable data is parsed as list of dicts."""
+        data = load_fixture(VALID_DIR / "javascript_json_embedded.json")
+        page = analyze_page(data["_entry"])
+        ds_var = next(v for v in page.js_json_variables if v.name == "json_dsData")
+        assert isinstance(ds_var.data, list)
+        assert len(ds_var.data) == 2
+        assert ds_var.data[0]["ChannelID"] == "1"
+
+    def test_js_json_not_triggered_by_scalar_assignments(self) -> None:
+        """Simple scalar assignments are not detected as JS JSON."""
+        entry = _make_entry(
+            "/status.php",
+            200,
+            "text/html",
+            "<html><script>var count = 5; var name = 'test';</script></html>",
+        )
+        page = analyze_page(entry)
+        assert page.js_json_variables == []
+
+
 @pytest.mark.parametrize(
     "fixture_path",
     JS_EDGE_CASE_FIXTURES,

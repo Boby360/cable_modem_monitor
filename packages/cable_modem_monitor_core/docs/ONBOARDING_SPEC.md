@@ -122,6 +122,17 @@ Check the **first request** in the HAR:
 | JSON POST with salt/PBKDF2 flow | `form_pbkdf2` auth |
 | No auth headers, no login, immediate 200 with data | `none` auth |
 
+**Common mistake — 401 does not mean Basic Auth.** Many modems return
+401 for any unauthenticated request regardless of their actual auth
+mechanism (form-based, HNAP, etc.). The `WWW-Authenticate` response
+header is what identifies the mechanism. Without it, do not assume
+`basic` in modem.yaml.
+
+**Cross-validation: session config must match auth type.** HTTP Basic
+Auth is stateless — no cookies, no sessions, no logout. If the
+modem.yaml has session config (cookies, logout endpoints,
+max_concurrent) but declares `basic` auth, the auth type is wrong.
+
 **If auth mechanism cannot be determined:** HARD STOP. Report what was
 observed and what's missing. Do not guess.
 
@@ -329,7 +340,7 @@ Format is constrained by transport:
 | Transport | Format detection |
 |-----------|-----------------|
 | `hnap` | Always `hnap`. See HNAP format detection below. |
-| `http` | Inspect data page responses — see below. JSON responses use `json` format; HTML responses use `table`, `table_transposed`, `javascript`, or `html_fields`. |
+| `http` | Inspect data page responses — see below. JSON responses use `json` format; HTML responses use `table`, `table_transposed`, `javascript`, `javascript_json`, or `html_fields`. |
 
 #### HNAP format detection
 
@@ -405,6 +416,11 @@ Response body analysis (sniff-then-Content-Type):
   │   │   │       "Frequency", "Power Level"; subsequent columns have values
   │   │   │
   │   │   └── Cannot determine orientation → examine header row and data rows
+  │   │
+  │   ├── Contains <script> with JS variable assignments holding JSON arrays?
+  │   │   └── format: javascript_json
+  │   │       Indicators: variableName = [{...}, ...]; in <script> block,
+  │   │       array of dicts with 2+ keys (channel objects)
   │   │
   │   ├── Contains <script> with function bodies containing delimited data?
   │   │   └── format: javascript
@@ -550,6 +566,12 @@ label-to-field mapping as above, but rows are labels instead of columns.
 - `record_delimiter` and `field_delimiter` (split the delimited string)
 - Field indices within each record (same approach as JS — examine
   actual data to identify positions)
+
+**`javascript_json` format:** JS variable assignments containing JSON
+arrays of channel objects. Direction is inferred from the variable
+name (e.g., `json_dsData` → downstream). Mapping extraction reuses
+the JSON key→field pipeline. The `variable` name is captured in the
+section output for config generation.
 
 **`json` format:** Examine JSON response structure to determine:
 
@@ -1481,7 +1503,7 @@ Reproduced from [MODEM_YAML_SPEC.md](MODEM_YAML_SPEC.md#validation-rules) for qu
 
 | Transport | Valid auth strategies | Valid formats | Valid action types |
 |-----------|---------------------|---------------|-------------------|
-| `http` | `none`, `basic`, `form`, `form_nonce`, `url_token`, `form_pbkdf2`, `form_sjcl` | `table`, `table_transposed`, `html_fields`, `javascript`, `json`, `xml` | `http` |
+| `http` | `none`, `basic`, `form`, `form_nonce`, `url_token`, `form_pbkdf2`, `form_sjcl` | `table`, `table_transposed`, `html_fields`, `javascript`, `javascript_json`, `json`, `xml` | `http` |
 | `hnap` | `hnap` | `hnap` | `hnap` |
 
 ---

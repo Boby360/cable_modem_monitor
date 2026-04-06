@@ -141,6 +141,7 @@ Authoritative doc indexes:
 | ----- | ----- |
 | `packages/cable_modem_monitor_core/docs/README.md` | Core specs — architecture, auth, parsing, orchestration, onboarding |
 | `custom_components/cable_modem_monitor/docs/README.md` | HA specs — config flow, entities, adapter wiring |
+| `docs/README.md` | Project docs — guides, references, setup |
 | `docs/CODE_REVIEW.md` | Coding standards, test patterns, naming conventions |
 | `docs/reference/RELEASING.md` | Release process (alpha, beta, stable) |
 

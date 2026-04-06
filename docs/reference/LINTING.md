@@ -166,4 +166,4 @@ Settings in `.vscode/settings.json`:
 - [Black](https://black.readthedocs.io/)
 - [mypy](https://mypy.readthedocs.io/)
 - [Bandit](https://bandit.readthedocs.io/)
-- [CodeQL](.github/codeql/README.md)
+- [CodeQL](../../.github/codeql/README.md)

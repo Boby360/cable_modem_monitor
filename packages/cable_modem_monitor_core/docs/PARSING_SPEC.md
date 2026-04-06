@@ -39,7 +39,7 @@ declaratively.
 |---------|----------------|
 | [Two Layers: Transport and Format](#two-layers-transport-and-format) | Transport selects loader, format selects parser |
 | [Resource Dict](#resource-dict) | What parsers receive — keyed by path, transport-specific values |
-| [parser.yaml Schema](#parseryaml-schema) | Declarative config for all 6 extraction formats |
+| [parser.yaml Schema](#parseryaml-schema) | Declarative config for all extraction formats |
 | [System Info](#system-info) | Extracting software version, uptime, network access |
 | [Companion Tables (merge_by)](#companion-tables-merge_by) | Merging error stats from separate tables into channels |
 | [parser.py — Post-Processing Hooks](#parserpy--post-processing-hooks) | When and how to use code-based post-processing |
@@ -74,7 +74,7 @@ respectively).
 | Transport | Valid Formats | Why |
 |-----------|--------------|-----|
 | `hnap` | `hnap` | Protocol-defined: SOAP JSON with delimiters |
-| `http` | `table`, `table_transposed`, `html_fields`, `javascript`, `json` | Format determines decode step; any format supports optional `encoding` property (e.g., `base64` — decoded before format-specific parsing). |
+| `http` | `table`, `table_transposed`, `html_fields`, `javascript`, `javascript_json`, `json` | Format determines decode step; any format supports optional `encoding` property (e.g., `base64` — decoded before format-specific parsing). |
 | `cbn` | `xml` | XML POST API: parameterized POST with XML responses |
 
 See [MODEM_YAML_SPEC.md](MODEM_YAML_SPEC.md#validation-rules) for the full transport constraint
@@ -90,6 +90,7 @@ table including auth strategies.
 | `html_fields` | `HTMLFieldsParser` | Named fields in HTML via label text or element id | system_info only |
 | **HTML (embedded JS)** | | | |
 | `javascript` | `JSEmbeddedParser` | Delimited strings in JS variables/functions | any section |
+| `javascript_json` | `JSJsonParser` | JSON arrays in JS variable assignments | any section |
 | `javascript_vars` | `JSVarsSystemInfoParser` | Simple `var x = 'value'` assignments in `<script>` tags | system_info only |
 | **JSON** | | | |
 | `hnap` | `HNAPParser` | Delimiter-separated values in HNAP JSON responses | any section |
@@ -792,6 +793,70 @@ upstream:
 
 Multiple functions in the same section (e.g., QAM + OFDM downstream)
 produce channels that are concatenated into a single list.
+
+### JSJsonParser
+
+Extracts data from JSON arrays embedded in JavaScript variable
+assignments within `<script>` tags. Unlike `javascript` format (which
+parses delimited strings from function bodies), `javascript_json`
+parses structured JSON objects — each array element is a channel dict
+with named keys.
+
+**Example page source (TG3442DE):**
+
+```html
+<script type="text/javascript">
+json_dsData = [{"ChannelType":"SC-QAM","Modulation":"QAM256",
+  "Frequency":"507 MHz","PowerLevel":"3.2 dBmV",
+  "SNRLevel":"38.5 dB","LockStatus":"Locked","ChannelID":"1"}];
+json_usData = [{"ChannelType":"ATDMA","Modulation":"QAM64",
+  "Frequency":"37.7 MHz","PowerLevel":"45.0 dBmV","ChannelID":"1"}];
+</script>
+```
+
+**Example parser.yaml:**
+
+```yaml
+downstream:
+  format: javascript_json
+  resource: "/php/status_docsis_data.php"
+  variable: "json_dsData"
+  mappings:
+    - key: ChannelID
+      field: channel_id
+      type: integer
+    - key: Frequency
+      field: frequency
+      type: frequency
+    - key: PowerLevel
+      field: power
+      type: power
+```
+
+**Config fields:**
+
+| Field | Type | Required | Purpose |
+|-------|------|----------|---------|
+| `format` | string | yes | `javascript_json` — selects `JSJsonParser` |
+| `resource` | string | yes | URL path key in the resource dict |
+| `variable` | string | yes | JS variable name holding the JSON array |
+| `mappings` | list | yes | JSON key→field mappings (same as `json` format) |
+| `mappings[].key` | string | yes | JSON object key name |
+| `mappings[].field` | string | yes | Canonical output field name |
+| `mappings[].type` | string | yes | Field type (see Common Concepts) |
+| `channel_type` | object | no | Channel type detection config |
+| `filter` | dict | no | Row filter for mixed-type arrays |
+
+**Extraction algorithm:**
+
+1. Decode response as HTML (BeautifulSoup)
+2. Find `<script>` tag containing the variable name
+3. Extract JSON array via regex: `{variable}\s*=\s*(\[.*?\])\s*;`
+4. Parse the extracted string as JSON
+5. Map each object's keys to canonical fields via `mappings`
+
+The `variable` field distinguishes downstream from upstream when both
+share the same resource URL (e.g., `json_dsData` vs `json_usData`).
 
 ### HNAPParser
 
