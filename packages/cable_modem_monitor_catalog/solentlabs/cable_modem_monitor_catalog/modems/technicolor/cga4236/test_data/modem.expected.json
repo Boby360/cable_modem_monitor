@@ -192,6 +192,7 @@
     "hardware_version": "1.0",
     "memory_free": "28476",
     "memory_total": "233520",
+    "memory_used_pct": 87.8,
     "model_name": "CGA4236TCH1",
     "software_version": "CGA4236TCH1-19.3B71-031-PCU-RT-230724",
     "system_uptime": "153513",

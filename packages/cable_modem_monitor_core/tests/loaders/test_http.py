@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64 as b64mod
 from typing import Any
 
 import pytest
@@ -11,6 +12,7 @@ from solentlabs.cable_modem_monitor_core.auth.base import AuthResult
 from solentlabs.cable_modem_monitor_core.loaders.fetch_list import ResourceTarget
 from solentlabs.cable_modem_monitor_core.loaders.http import (
     HTTPResourceLoader,
+    LoginPageDetectedError,
     ResourceLoadError,
     _decode_response,
 )
@@ -45,64 +47,74 @@ def _build_entries(
     return entries
 
 
-class TestDecodeResponse:
-    """Response decoding by format."""
+# ---------------------------------------------------------------------------
+# _decode_response — table-driven
+# ---------------------------------------------------------------------------
 
-    def test_table_format_returns_beautifulsoup(self) -> None:
-        """HTML table format produces BeautifulSoup."""
-        result = _decode_response("<html><table></table></html>", "table", "")
+# ┌──────────────────────────┬───────────────────┬──────────┬───────────┬──────────────────────────────────┐
+# │ text                     │ format            │ encoding │ exp_type  │ description                      │
+# ├──────────────────────────┼───────────────────┼──────────┼───────────┼──────────────────────────────────┤
+# │ "<html>..."              │ table             │ ""       │ soup      │ HTML table                       │
+# │ "<html>..."              │ table_transposed  │ ""       │ soup      │ transposed table                 │
+# │ "<script>..."            │ javascript        │ ""       │ soup      │ JS embedded                      │
+# │ "<script>..."            │ javascript_json   │ ""       │ soup      │ JS JSON                          │
+# │ "<html>..."              │ html_fields       │ ""       │ soup      │ html_fields                      │
+# │ '{"key":"val"}'          │ json              │ ""       │ dict      │ valid JSON dict                  │
+# │ "not json"               │ json              │ ""       │ None      │ invalid JSON                     │
+# │ "[1,2,3]"                │ json              │ ""       │ dict      │ non-dict JSON → _raw wrapper     │
+# │ b64("<html>...")         │ table             │ base64   │ soup      │ base64-encoded body              │
+# │ "!!!invalid"             │ table             │ base64   │ None      │ base64 decode failure            │
+# │ ""                       │ table             │ ""       │ None      │ empty body                       │
+# │ "<root/>"                │ xml               │ ""       │ None      │ XML not yet supported by loader  │
+# │ "<html>..."              │ unknown           │ ""       │ soup      │ unknown format fallback          │
+# └──────────────────────────┴───────────────────┴──────────┴───────────┴──────────────────────────────────┘
+
+_B64_HTML = b64mod.b64encode(b"<html><table></table></html>").decode()
+
+# fmt: off
+_DECODE_CASES: list[tuple[str, str, str, str | None, str]] = [
+    # (text,                          format,             encoding, exp_type, description)
+    ("<html><table></table></html>",  "table",            "",       "soup",   "HTML table"),
+    ("<html></html>",                 "table_transposed", "",       "soup",   "transposed table"),
+    ("<script>var x=1;</script>",     "javascript",       "",       "soup",   "JS embedded"),
+    ("<script>var x=1;</script>",     "javascript_json",  "",       "soup",   "JS JSON"),
+    ("<html><div>info</div></html>",  "html_fields",      "",       "soup",   "html_fields"),
+    ('{"key": "value"}',              "json",             "",       "dict",   "valid JSON dict"),
+    ("not json",                      "json",             "",       None,     "invalid JSON"),
+    ("[1, 2, 3]",                     "json",             "",       "dict",   "non-dict JSON wrapped"),
+    (_B64_HTML,                       "table",            "base64", "soup",   "base64-encoded body"),
+    ("x",                             "table",            "base64", None,     "base64 decode failure"),
+    ("",                              "table",            "",       None,     "empty body"),
+    ("<root/>",                       "xml",              "",       None,     "XML not yet supported"),
+    ("<html></html>",                 "unknown",          "",       "soup",   "unknown format fallback"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize("text,fmt,encoding,exp_type,desc", _DECODE_CASES, ids=[c[4] for c in _DECODE_CASES])
+def test_decode_response(text: str, fmt: str, encoding: str, exp_type: str | None, desc: str) -> None:
+    """_decode_response: {desc}."""
+    result = _decode_response(text, fmt, encoding)
+    if exp_type is None:
+        assert result is None
+    elif exp_type == "soup":
         assert isinstance(result, BeautifulSoup)
-
-    def test_table_transposed_returns_beautifulsoup(self) -> None:
-        """Transposed table format produces BeautifulSoup."""
-        result = _decode_response("<html></html>", "table_transposed", "")
-        assert isinstance(result, BeautifulSoup)
-
-    def test_javascript_returns_beautifulsoup(self) -> None:
-        """JavaScript format produces BeautifulSoup."""
-        result = _decode_response("<script>var x=1;</script>", "javascript", "")
-        assert isinstance(result, BeautifulSoup)
-
-    def test_html_fields_returns_beautifulsoup(self) -> None:
-        """html_fields format produces BeautifulSoup."""
-        result = _decode_response("<html><div>info</div></html>", "html_fields", "")
-        assert isinstance(result, BeautifulSoup)
-
-    def test_json_format_returns_dict(self) -> None:
-        """JSON format produces dict."""
-        result = _decode_response('{"key": "value"}', "json", "")
+    elif exp_type == "dict":
         assert isinstance(result, dict)
+
+
+class TestDecodeResponseBehaviors:
+    """Behavioral assertions beyond type checking."""
+
+    def test_json_dict_preserves_keys(self) -> None:
+        """Valid JSON dict preserves original keys."""
+        result = _decode_response('{"key": "value"}', "json", "")
         assert result["key"] == "value"
 
-    def test_json_invalid_returns_none(self) -> None:
-        """Invalid JSON returns None."""
-        result = _decode_response("not json", "json", "")
-        assert result is None
-
-    def test_json_non_dict_wrapped(self) -> None:
+    def test_json_non_dict_wrapped_in_raw(self) -> None:
         """Non-dict JSON is wrapped in _raw key."""
         result = _decode_response("[1, 2, 3]", "json", "")
-        assert isinstance(result, dict)
         assert result["_raw"] == [1, 2, 3]
-
-    def test_base64_encoding_decoded(self) -> None:
-        """Base64-encoded response is decoded before format parsing."""
-        import base64
-
-        html = "<html><table></table></html>"
-        encoded = base64.b64encode(html.encode()).decode()
-        result = _decode_response(encoded, "table", "base64")
-        assert isinstance(result, BeautifulSoup)
-
-    def test_empty_response_returns_none(self) -> None:
-        """Empty response body returns None."""
-        result = _decode_response("", "table", "")
-        assert result is None
-
-    def test_unknown_format_falls_back_to_beautifulsoup(self) -> None:
-        """Unknown format falls back to BeautifulSoup."""
-        result = _decode_response("<html></html>", "unknown", "")
-        assert isinstance(result, BeautifulSoup)
 
 
 class TestHTTPResourceLoader:
@@ -291,3 +303,93 @@ class TestHTTPResourceLoader:
 
         # Should reuse the auth response (error content), not fetch from server
         assert "Error Landing" in resources["/status.html"].get_text()
+
+    def test_connection_failure_raises_resource_load_error(self) -> None:
+        """ConnectionError during fetch raises ResourceLoadError."""
+        from unittest.mock import patch
+
+        session = requests.Session()
+        loader = HTTPResourceLoader(session, "http://127.0.0.1", timeout=1)
+        targets = [ResourceTarget(path="/status.html", format="table")]
+        with (
+            patch.object(session, "get", side_effect=requests.ConnectionError("refused")),
+            pytest.raises(ResourceLoadError, match="Failed to fetch"),
+        ):
+            loader.fetch(targets)
+
+    def test_undecoded_response_skipped(self) -> None:
+        """Page that decodes to None is excluded from resources."""
+        entries = _build_entries({"/data.json": ("application/json", "not valid json")})
+
+        with HARMockServer(entries) as server:
+            session = requests.Session()
+            loader = HTTPResourceLoader(session, server.base_url, timeout=10)
+            targets = [ResourceTarget(path="/data.json", format="json")]
+            resources = loader.fetch(targets)
+
+        assert "/data.json" not in resources
+
+    def test_login_page_detected(self) -> None:
+        """Login page detection raises LoginPageDetectedError."""
+        login_html = '<html><form><input type="password" name="pw"></form></html>'
+        entries = _build_entries({"/status.html": ("text/html", login_html)})
+
+        with HARMockServer(entries) as server:
+            session = requests.Session()
+            loader = HTTPResourceLoader(
+                session,
+                server.base_url,
+                timeout=10,
+                detect_login_pages=True,
+            )
+            targets = [ResourceTarget(path="/status.html", format="table")]
+            with pytest.raises(LoginPageDetectedError):
+                loader.fetch(targets)
+
+    def test_401_raises_resource_load_error(self) -> None:
+        """401 response raises ResourceLoadError with status code."""
+        # Build a HAR entry that returns 401
+        entries = [
+            {
+                "request": {"method": "GET", "url": "http://192.168.100.1/status.html"},
+                "response": {
+                    "status": 401,
+                    "headers": [],
+                    "content": {"text": "Unauthorized"},
+                },
+            }
+        ]
+
+        with HARMockServer(entries) as server:
+            session = requests.Session()
+            loader = HTTPResourceLoader(session, server.base_url, timeout=10)
+            targets = [ResourceTarget(path="/status.html", format="table")]
+            with pytest.raises(ResourceLoadError, match="401"):
+                loader.fetch(targets)
+
+    def test_resource_fetches_recorded(self) -> None:
+        """Per-resource timing tuples are populated after fetch."""
+        entries = _build_entries(
+            {
+                "/status.html": ("text/html", "<html>Status</html>"),
+                "/info.html": ("text/html", "<html>Info</html>"),
+            }
+        )
+
+        with HARMockServer(entries) as server:
+            session = requests.Session()
+            loader = HTTPResourceLoader(session, server.base_url, timeout=10)
+            targets = [
+                ResourceTarget(path="/status.html", format="table"),
+                ResourceTarget(path="/info.html", format="html_fields"),
+            ]
+            loader.fetch(targets)
+
+        assert len(loader.resource_fetches) == 2
+        paths = [f[0] for f in loader.resource_fetches]
+        assert "/status.html" in paths
+        assert "/info.html" in paths
+        # Each tuple is (path, duration_ms, size_bytes)
+        for _path, duration_ms, size_bytes in loader.resource_fetches:
+            assert duration_ms >= 0
+            assert size_bytes > 0

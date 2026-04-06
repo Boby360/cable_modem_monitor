@@ -311,15 +311,7 @@ def _build_diagnostics_dict(
             "supports_icmp": entry.data.get(CONF_SUPPORTS_ICMP, False),
             "supports_head": entry.data.get(CONF_SUPPORTS_HEAD, False),
         },
-        "core_diagnostics": {
-            "poll_duration": core_diag.poll_duration,
-            "auth_failure_streak": core_diag.auth_failure_streak,
-            "circuit_breaker_open": core_diag.circuit_breaker_open,
-            "session_is_valid": core_diag.session_is_valid,
-            "connectivity_streak": core_diag.connectivity_streak,
-            "connectivity_backoff_remaining": core_diag.connectivity_backoff_remaining,
-            "last_poll_timestamp": core_diag.last_poll_timestamp,
-        },
+        "core_diagnostics": core_diag.to_dict(),
         "data_coordinator": {
             "last_update_success": data_coord.last_update_success,
             "update_interval": str(data_coord.update_interval),

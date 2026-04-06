@@ -243,6 +243,7 @@ class Orchestrator:
             session_is_valid=self._collector.session_is_valid,
             connectivity_streak=self._policy.connectivity_streak,
             connectivity_backoff_remaining=self._policy.connectivity_backoff_remaining,
+            resource_fetches=self._collector.last_resource_fetches,
             last_poll_timestamp=self._last_poll_timestamp,
         )
 

@@ -34,6 +34,7 @@ from solentlabs.cable_modem_monitor_core.loaders.http import (
 from solentlabs.cable_modem_monitor_core.orchestration.collector import (
     LoginLockoutError,
     ModemDataCollector,
+    _auth_failure_hint,
     _should_detect_login_pages,
 )
 from solentlabs.cable_modem_monitor_core.orchestration.signals import (
@@ -253,7 +254,7 @@ def _run_collector_with_failure(
     load_patch = (
         patch.object(collector, "_load_resources", side_effect=load_side_effect)
         if load_side_effect
-        else patch.object(collector, "_load_resources", return_value={})
+        else patch.object(collector, "_load_resources", return_value=({}, []))
     )
     parse_patch = (
         patch.object(collector, "_parse", side_effect=parse_side_effect)
@@ -486,7 +487,7 @@ class TestSuccessfulCollection:
             patch.object(
                 collector,
                 "_load_resources",
-                return_value={"data": "ok"},
+                return_value=({"data": "ok"}, []),
             ),
             patch.object(
                 collector,
@@ -519,7 +520,7 @@ class TestSuccessfulCollection:
             patch.object(
                 collector,
                 "_load_resources",
-                return_value={"data": "ok"},
+                return_value=({"data": "ok"}, []),
             ),
             patch.object(
                 collector,
@@ -563,7 +564,7 @@ class TestLogout:
             patch.object(
                 collector,
                 "_load_resources",
-                return_value={},
+                return_value=({}, []),
             ),
             patch.object(
                 collector,
@@ -597,7 +598,7 @@ class TestLogout:
             patch.object(
                 collector,
                 "_load_resources",
-                return_value={},
+                return_value=({}, []),
             ),
             patch.object(
                 collector,
@@ -630,7 +631,7 @@ class TestLogout:
             patch.object(
                 collector,
                 "_load_resources",
-                return_value={},
+                return_value=({}, []),
             ),
             patch.object(
                 collector,
@@ -666,7 +667,7 @@ class TestLogout:
         auth_result = MagicMock(success=True, auth_context=AuthContext())
         with (
             patch.object(collector, "authenticate", return_value=auth_result),
-            patch.object(collector, "_load_resources", return_value={}),
+            patch.object(collector, "_load_resources", return_value=({}, [])),
             patch.object(collector, "_parse", return_value=modem_data),
             patch("solentlabs.cable_modem_monitor_core.orchestration.collector.execute_action"),
         ):
@@ -886,3 +887,100 @@ class TestMockServerLogout:
 
         handler = FormAuthHandler(login_path="/login.htm")
         assert handler.is_logout_request("GET", "/logout") is False
+
+
+# ------------------------------------------------------------------
+# Tests — _auth_failure_hint (table-driven)
+# ------------------------------------------------------------------
+
+# ┌───────────┬──────────────────────────────────────────┬──────────────┐
+# │ auth_type │ expected_hint                            │ description  │
+# ├───────────┼──────────────────────────────────────────┼──────────────┤
+# │ "none"    │ "modem requires authentication (check …" │ no-auth      │
+# │ "basic"   │ "credentials rejected"                   │ basic auth   │
+# │ "form"    │ "session expired"                        │ form auth    │
+# └───────────┴──────────────────────────────────────────┴──────────────┘
+#
+# fmt: off
+_AUTH_HINT_CASES = [
+    # (auth_type, expected_substring,               description)
+    ("none",      "modem requires authentication",  "no-auth modem"),
+    ("basic",     "credentials rejected",           "basic auth"),
+    ("form",      "session expired",                "form auth"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    "auth_type,expected,desc",
+    _AUTH_HINT_CASES,
+    ids=[c[2] for c in _AUTH_HINT_CASES],
+)
+def test_auth_failure_hint(auth_type: str, expected: str, desc: str) -> None:
+    """_auth_failure_hint: {desc}."""
+    config = _make_config(auth_type=auth_type)
+    assert expected in _auth_failure_hint(config)
+
+
+# ------------------------------------------------------------------
+# Tests — session_is_valid edge cases
+# ------------------------------------------------------------------
+
+
+class TestSessionIsValidEdgeCases:
+    """Cover session_is_valid branches not reached by main tests."""
+
+    def test_none_auth_config_no_context(self) -> None:
+        """auth=None with no auth context returns True."""
+        config = _make_config(auth_type="none")
+        config.auth = None
+        collector = ModemDataCollector(config, MagicMock(), None, "http://localhost", "", "")
+        assert collector.session_is_valid is True
+
+    def test_fallthrough_returns_true(self) -> None:
+        """Non-HNAP, non-cookie, non-url-token auth returns True."""
+        config = _make_config(auth_type="basic")
+        collector = ModemDataCollector(config, MagicMock(), None, "http://localhost", "", "pw")
+        # Simulate having authenticated (sets auth_context)
+        collector._auth_context = AuthContext(private_key="")
+        assert collector.session_is_valid is True
+
+
+# ------------------------------------------------------------------
+# Tests — last_resource_fetches property
+# ------------------------------------------------------------------
+
+
+class TestResourceFetchesProperty:
+    """Verify last_resource_fetches surfaces loader timing."""
+
+    def test_empty_before_first_poll(self) -> None:
+        """resource_fetches is empty before any collection."""
+        config = _make_config(auth_type="none")
+        collector = ModemDataCollector(config, MagicMock(), None, "http://localhost", "", "")
+        assert collector.last_resource_fetches == []
+
+    def test_populated_after_successful_collection(self) -> None:
+        """resource_fetches populated after execute()."""
+        from solentlabs.cable_modem_monitor_core.orchestration.models import (
+            ResourceFetch,
+        )
+
+        config = _make_config(auth_type="none")
+        collector = ModemDataCollector(config, MagicMock(), None, "http://localhost", "", "")
+
+        mock_fetches = [ResourceFetch("/status.html", 500.0, 12000)]
+        with (
+            patch.object(collector, "authenticate", return_value=MagicMock(success=True)),
+            patch.object(collector, "_load_resources", return_value=({}, mock_fetches)),
+            patch.object(
+                collector,
+                "_parse",
+                return_value={"downstream": [], "upstream": [], "system_info": {}},
+            ),
+        ):
+            result = collector.execute()
+
+        assert result.success is True
+        assert len(collector.last_resource_fetches) == 1
+        assert collector.last_resource_fetches[0].path == "/status.html"

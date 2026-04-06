@@ -212,7 +212,10 @@ def create_auth_handler(
         return AuthHandler()
 
     if isinstance(auth, BasicAuth):
-        return BasicAuthHandler()
+        return BasicAuthHandler(
+            challenge_cookie=auth.challenge_cookie,
+            cookie_name=auth.cookie_name,
+        )
 
     if isinstance(auth, FormAuth | FormNonceAuth):
         return _create_form_auth_handler(modem_config)

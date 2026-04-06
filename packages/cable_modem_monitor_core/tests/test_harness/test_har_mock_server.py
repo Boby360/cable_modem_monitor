@@ -344,6 +344,31 @@ class TestBasicAuthHandler:
         """Non-Basic auth scheme is not authenticated."""
         assert not BasicAuthHandler().is_authenticated({"authorization": "Bearer token123"})
 
+    def test_challenge_response_default(self) -> None:
+        """Default challenge has WWW-Authenticate but no Set-Cookie."""
+        handler = BasicAuthHandler()
+        challenge = handler.get_challenge_response()
+        assert challenge.status == 401
+        header_names = [h[0] for h in challenge.headers]
+        assert "WWW-Authenticate" in header_names
+        assert "Set-Cookie" not in header_names
+
+    def test_challenge_response_with_cookie(self) -> None:
+        """challenge_cookie=True adds Set-Cookie to 401 response."""
+        handler = BasicAuthHandler(challenge_cookie=True, cookie_name="XSRF_TOKEN")
+        challenge = handler.get_challenge_response()
+        assert challenge.status == 401
+        header_dict = dict(challenge.headers)
+        assert header_dict["WWW-Authenticate"] == 'Basic realm="modem"'
+        assert "XSRF_TOKEN=mock-challenge" in header_dict["Set-Cookie"]
+
+    def test_challenge_response_cookie_without_name(self) -> None:
+        """challenge_cookie=True but empty cookie_name omits Set-Cookie."""
+        handler = BasicAuthHandler(challenge_cookie=True, cookie_name="")
+        challenge = handler.get_challenge_response()
+        header_names = [h[0] for h in challenge.headers]
+        assert "Set-Cookie" not in header_names
+
 
 # ---------------------------------------------------------------------------
 # Layer 3: HTTP server integration tests (fixture-driven)

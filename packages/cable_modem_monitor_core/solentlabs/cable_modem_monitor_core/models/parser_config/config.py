@@ -6,7 +6,7 @@ declarations into a unified config.
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, model_validator
 
@@ -60,6 +60,28 @@ class AggregateField(BaseModel):
     channels: str
 
 
+class ComputedField(BaseModel):
+    """A derived field computed from other system_info fields.
+
+    Declares a named operation applied to input fields. The ``inputs``
+    dict maps operation-defined parameter names to system_info field
+    names. Each operation defines what keys it expects.
+
+    See PARSING_SPEC.md § Computed (Derived system_info Fields).
+
+    Attributes:
+        operation: Named operation to apply (e.g., ``percent_used``).
+        inputs: Mapping of operation parameter names to system_info
+            field names (e.g., ``{total: memory_total, free: memory_free}``).
+        precision: Decimal places for numeric results (default 1).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    operation: Literal["percent_used"]
+    inputs: dict[str, str]
+    precision: int = 1
+
+
 class ParserConfig(BaseModel):
     """Full parser.yaml schema.
 
@@ -76,6 +98,7 @@ class ParserConfig(BaseModel):
     upstream: ChannelSection | None = None
     system_info: SystemInfoSection | None = None
     aggregate: dict[str, AggregateField] = Field(default_factory=dict)
+    computed: dict[str, ComputedField] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_has_sections(self) -> ParserConfig:

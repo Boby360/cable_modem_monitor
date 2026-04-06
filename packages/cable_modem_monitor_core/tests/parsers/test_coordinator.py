@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup
 from solentlabs.cable_modem_monitor_core.models.parser_config import ParserConfig
 from solentlabs.cable_modem_monitor_core.parsers.coordinator import (
     ModemParserCoordinator,
+    _parse_numeric,
 )
 from solentlabs.cable_modem_monitor_core.parsers.registries import (
     _merge_channels,
@@ -490,6 +491,45 @@ class TestDerivedFieldEnrichment:
         assert result["system_info"]["upstream_channel_count"] == 0
         # No aggregate fields
         assert len(result["system_info"]) == 2
+
+    # Computed field tests are fixture-driven — see:
+    #   fixtures/coordinator/valid/computed_percent_used.json
+    #   fixtures/coordinator/valid/computed_missing_input.json
+    #   fixtures/coordinator/valid/computed_zero_total.json
+    #   fixtures/coordinator/valid/computed_native_wins.json
+    #   fixtures/coordinator/valid/computed_precision.json
+
+
+# ---------------------------------------------------------------------------
+# _parse_numeric — table-driven
+# ---------------------------------------------------------------------------
+
+# ┌─────────────┬──────────┬─────────────────────┐
+# │ input       │ expected │ description         │
+# ├─────────────┼──────────┼─────────────────────┤
+# │ "233520"    │ 233520.0 │ plain integer       │
+# │ "3.14"      │ 3.14     │ float               │
+# │ "524288 kB" │ 524288.0 │ value with units    │
+# │ ""          │ None     │ empty string        │
+# │ "N/A"       │ None     │ non-numeric         │
+# └─────────────┴──────────┴─────────────────────┘
+#
+# fmt: off
+_PARSE_NUMERIC_CASES = [
+    ("233520",    233520.0, "plain integer"),
+    ("3.14",      3.14,     "float"),
+    ("524288 kB", 524288.0, "value with units"),
+    ("",          None,     "empty string"),
+    ("N/A",       None,     "non-numeric"),
+    ("  42  ",    42.0,     "whitespace padded"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize("value,expected,desc", _PARSE_NUMERIC_CASES)
+def test_parse_numeric(value: str, expected: float | None, desc: str) -> None:
+    """_parse_numeric: {desc}."""
+    assert _parse_numeric(value) == expected
 
 
 # ---------------------------------------------------------------------------

@@ -149,13 +149,13 @@ class ModemParserCoordinator:
         return result
 
     def _enrich_derived_fields(self, data: dict[str, Any]) -> None:
-        """Enrich system_info with channel counts and aggregate sums.
+        """Enrich system_info with channel counts, aggregates, and computed fields.
 
         Runs after all sections are extracted and hooks have run.
         Uses ``setdefault`` so native values from the parser take
         precedence over computed values.
 
-        See PARSING_SPEC.md § Aggregate (Derived system_info Fields).
+        See PARSING_SPEC.md § Aggregate and § Computed sections.
         """
         system_info = data.setdefault("system_info", {})
 
@@ -177,6 +177,15 @@ class ModemParserCoordinator:
             total = _sum_field(channels, field_def.sum)
             if total is not None:
                 system_info[field_name] = total
+
+        # Computed fields — derived from other system_info fields
+        for computed_name, computed_def in self._config.computed.items():
+            if computed_name in system_info:
+                continue  # native mapping wins
+
+            value = _apply_computed(system_info, computed_def)
+            if value is not None:
+                system_info[computed_name] = value
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +245,75 @@ def _sum_field(channels: list[dict[str, Any]], field_name: str) -> int | float |
             found = True
 
     return total if found else None
+
+
+def _parse_numeric(value: str) -> float | None:
+    """Parse a numeric string, stripping trailing units if present.
+
+    Handles plain numbers (``"233520"``) and values with units
+    (``"524288 kB"``). Returns ``None`` if the value is not numeric.
+    """
+    stripped = value.strip()
+    if not stripped:
+        return None
+
+    # Try the string as-is first (common case: plain number)
+    try:
+        return float(stripped)
+    except ValueError:
+        pass
+
+    # Strip trailing non-numeric suffix (e.g., "524288 kB" → "524288")
+    parts = stripped.split(None, 1)
+    try:
+        return float(parts[0])
+    except (ValueError, IndexError):
+        return None
+
+
+def _apply_computed(
+    system_info: dict[str, Any],
+    computed_def: Any,
+) -> float | None:
+    """Dispatch a computed field operation.
+
+    Resolves input field names from ``computed_def.inputs`` against
+    ``system_info``, then applies the named operation.
+    """
+    if computed_def.operation == "percent_used":
+        return _compute_percent_used(system_info, computed_def.inputs, computed_def.precision)
+    return None  # pragma: no cover — Literal type prevents reaching here
+
+
+def _compute_percent_used(
+    system_info: dict[str, Any],
+    inputs: dict[str, str],
+    precision: int,
+) -> float | None:
+    """Compute usage percentage from total and free system_info fields.
+
+    Expected inputs: ``total`` and ``free``, each mapping to a
+    system_info field name.
+
+    Returns ``None`` if either input field is missing or non-numeric,
+    or if total is zero (avoids division by zero).
+    """
+    total_field = inputs.get("total", "")
+    free_field = inputs.get("free", "")
+    if not total_field or not free_field:
+        return None
+
+    raw_total = system_info.get(total_field)
+    raw_free = system_info.get(free_field)
+    if raw_total is None or raw_free is None:
+        return None
+
+    total = _parse_numeric(str(raw_total))
+    free = _parse_numeric(str(raw_free))
+    if total is None or free is None or total <= 0:
+        return None
+
+    return round((total - free) / total * 100, precision)
 
 
 def filter_restart_window(

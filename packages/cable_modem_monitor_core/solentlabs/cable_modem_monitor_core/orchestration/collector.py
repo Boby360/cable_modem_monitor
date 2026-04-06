@@ -27,7 +27,7 @@ from ..loaders.http import (
 from ..models.modem_config.auth import BasicAuth, NoneAuth
 from ..parsers.coordinator import ModemParserCoordinator, filter_restart_window
 from .actions import execute_action
-from .models import ModemResult
+from .models import ModemResult, ResourceFetch
 from .signals import CollectorSignal
 
 _logger = logging.getLogger(__name__)
@@ -106,6 +106,9 @@ class ModemDataCollector:
         # Login page detection — enable for form-based auth strategies
         self._detect_login_pages = _should_detect_login_pages(modem_config)
 
+        # Per-resource timing from last successful collection
+        self._last_resource_fetches: list[ResourceFetch] = []
+
     def execute(self) -> ModemResult:
         """Execute one data collection.
 
@@ -147,7 +150,7 @@ class ModemDataCollector:
 
         # Phase 2: Load resources
         try:
-            resources = self._load_resources(auth_result)
+            resources, fetches = self._load_resources(auth_result)
         except LoginPageDetectedError as exc:
             return ModemResult(
                 success=False,
@@ -202,6 +205,8 @@ class ModemDataCollector:
         # Phase 5: Logout (best-effort, after successful collection)
         self._execute_logout_if_needed()
 
+        self._last_resource_fetches = fetches
+
         ds_count = len(data.get("downstream", []))
         us_count = len(data.get("upstream", []))
         _logger.debug(
@@ -255,6 +260,11 @@ class ModemDataCollector:
 
         # Already authenticated — assume valid until server rejects
         return True
+
+    @property
+    def last_resource_fetches(self) -> list[ResourceFetch]:
+        """Per-resource timing from the last successful collection."""
+        return self._last_resource_fetches
 
     def clear_session(self) -> None:
         """Invalidate the current session.
@@ -314,7 +324,10 @@ class ModemDataCollector:
 
         return result
 
-    def _load_resources(self, auth_result: AuthResult) -> dict[str, Any]:
+    def _load_resources(
+        self,
+        auth_result: AuthResult,
+    ) -> tuple[dict[str, Any], list[ResourceFetch]]:
         """Fetch all resources using the authenticated session."""
         if self._parser_config is None:
             raise RuntimeError(
@@ -329,7 +342,10 @@ class ModemDataCollector:
 
         return self._load_http_resources(auth_result)
 
-    def _load_http_resources(self, auth_result: AuthResult) -> dict[str, Any]:
+    def _load_http_resources(
+        self,
+        auth_result: AuthResult,
+    ) -> tuple[dict[str, Any], list[ResourceFetch]]:
         """Fetch HTTP resources."""
         targets = collect_fetch_targets(self._parser_config)
 
@@ -357,9 +373,10 @@ class ModemDataCollector:
         # On session reuse, don't pass auth_result — there's no
         # login response to reuse.
         effective_auth = auth_result if self._auth_context else None
-        return loader.fetch(targets, effective_auth)
+        resources = loader.fetch(targets, effective_auth)
+        return resources, _to_resource_fetches(loader.resource_fetches)
 
-    def _load_hnap_resources(self) -> dict[str, Any]:
+    def _load_hnap_resources(self) -> tuple[dict[str, Any], list[ResourceFetch]]:
         """Fetch HNAP resources via batched SOAP request."""
         from ..loaders.hnap import HNAPLoader
 
@@ -378,9 +395,10 @@ class ModemDataCollector:
             hmac_algorithm=hmac_algorithm,
             timeout=self._modem_config.timeout,
         )
-        return loader.fetch(self._parser_config)
+        resources = loader.fetch(self._parser_config)
+        return resources, _to_resource_fetches(loader.resource_fetches)
 
-    def _load_cbn_resources(self) -> dict[str, Any]:
+    def _load_cbn_resources(self) -> tuple[dict[str, Any], list[ResourceFetch]]:
         """Fetch CBN resources via XML POST with fun parameters.
 
         Logout is NOT done by the loader — the collector handles it
@@ -402,7 +420,8 @@ class ModemDataCollector:
             timeout=self._modem_config.timeout,
             model=self._modem_config.model,
         )
-        return loader.fetch(targets)
+        resources = loader.fetch(targets)
+        return resources, _to_resource_fetches(loader.resource_fetches)
 
     def _classify_hnap_error(self, exc: HNAPLoadError) -> ModemResult:
         """Route an HNAP load failure to the correct signal.
@@ -513,3 +532,10 @@ def _should_detect_login_pages(modem_config: Any) -> bool:
     if isinstance(modem_config.auth, NoneAuth | BasicAuth):
         return False
     return bool(modem_config.transport != "hnap")
+
+
+def _to_resource_fetches(
+    raw: list[tuple[str, float, int]],
+) -> list[ResourceFetch]:
+    """Convert loader timing tuples to ResourceFetch objects."""
+    return [ResourceFetch(path=r[0], duration_ms=r[1], size_bytes=r[2]) for r in raw]

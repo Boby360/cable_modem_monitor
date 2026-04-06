@@ -31,6 +31,10 @@ class AuthHandler:
         """Handle a login request. Returns response or None to pass through."""
         return None
 
+    def get_challenge_response(self) -> RouteEntry:
+        """Return the 401 challenge response for unauthenticated requests."""
+        return RouteEntry(status=401, headers=[], body="Unauthorized")
+
     def is_authenticated(self, headers: dict[str, str]) -> bool:
         """Check if the request is authenticated."""
         return True

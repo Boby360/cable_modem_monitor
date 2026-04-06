@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 import requests
@@ -57,6 +58,7 @@ class HNAPLoader:
         self._private_key = private_key
         self._hmac_algorithm = hmac_algorithm
         self._timeout = timeout
+        self.resource_fetches: list[tuple[str, float, int]] = []
 
     def fetch(self, parser_config: ParserConfig) -> dict[str, Any]:
         """Fetch all HNAP actions and return the resource dict.
@@ -95,6 +97,8 @@ class HNAPLoader:
             ),
         }
 
+        self.resource_fetches = []
+        start = time.monotonic()
         try:
             response = self._session.post(
                 self._url,
@@ -106,12 +110,15 @@ class HNAPLoader:
             raise HNAPLoadError(
                 f"HNAP GetMultipleHNAPs request failed: {e}",
             ) from e
+        elapsed_ms = (time.monotonic() - start) * 1000
 
         _logger.debug(
-            "HNAP POST: %d (%d bytes)",
+            "HNAP POST: %d (%d bytes, %.0fms)",
             response.status_code,
             len(response.content),
+            elapsed_ms,
         )
+        self.resource_fetches.append((HNAP_ENDPOINT, round(elapsed_ms, 1), len(response.content)))
 
         if response.status_code == 401:
             raise HNAPLoadError(

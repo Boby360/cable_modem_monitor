@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import time
 from typing import Any
 
 import requests
@@ -69,6 +70,7 @@ class HTTPResourceLoader:
         self._token_prefix = token_prefix
         self._detect_login_pages = detect_login_pages
         self._model = model
+        self.resource_fetches: list[tuple[str, float, int]] = []
 
     def fetch(
         self,
@@ -93,6 +95,7 @@ class HTTPResourceLoader:
             ResourceLoadError: If a required page cannot be fetched.
         """
         resources: dict[str, Any] = {}
+        self.resource_fetches = []
 
         # Check for auth response reuse
         reuse_path = ""
@@ -120,20 +123,24 @@ class HTTPResourceLoader:
 
             # Fetch the page
             url = self._build_url(target.path)
+            start = time.monotonic()
             try:
                 response = self._session.get(url, timeout=self._timeout)
             except requests.RequestException as e:
                 raise ResourceLoadError(
                     f"Failed to fetch {target.path}: {e}",
                 ) from e
+            elapsed_ms = (time.monotonic() - start) * 1000
 
             _logger.debug(
-                "Fetched %s [%s]: %d (%d bytes)",
+                "Fetched %s [%s]: %d (%d bytes, %.0fms)",
                 target.path,
                 self._model,
                 response.status_code,
                 len(response.content),
+                elapsed_ms,
             )
+            self.resource_fetches.append((target.path, round(elapsed_ms, 1), len(response.content)))
 
             if response.status_code in (401, 403):
                 raise ResourceLoadError(

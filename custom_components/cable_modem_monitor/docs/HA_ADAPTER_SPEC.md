@@ -426,10 +426,17 @@ Combines Core's `OrchestratorDiagnostics` with HA-side context.
 
 **From Core (`orchestrator.diagnostics()`):**
 
+Serialized via `OrchestratorDiagnostics.to_dict()` — all fields
+included automatically when new diagnostics are added to the model.
+
+- `poll_duration` — last poll wall-clock time in seconds
 - `auth_failure_streak` — consecutive auth failures (0 = healthy)
 - `circuit_breaker_open` — whether polling is stopped
 - `session_is_valid` — auth manager session state
-- `poll_duration` — last poll wall-clock time in seconds
+- `connectivity_streak` — consecutive connectivity failures
+- `connectivity_backoff_remaining` — polls to skip before retry
+- `resource_fetches` — per-resource timing and size from last
+  successful collection (path, duration_ms, size_bytes per resource)
 - `last_poll_timestamp` — monotonic time of last poll
 
 **From HA (adapter-side):**

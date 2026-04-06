@@ -89,6 +89,14 @@ class ResourceFetch:
     duration_ms: float
     size_bytes: int
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for diagnostics output."""
+        return {
+            "path": self.path,
+            "duration_ms": self.duration_ms,
+            "size_bytes": self.size_bytes,
+        }
+
 
 @dataclass
 class HealthInfo:
@@ -179,6 +187,19 @@ class OrchestratorDiagnostics:
     connectivity_backoff_remaining: int = 0
     resource_fetches: list[ResourceFetch] = field(default_factory=list)
     last_poll_timestamp: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for diagnostics output."""
+        return {
+            "poll_duration": self.poll_duration,
+            "auth_failure_streak": self.auth_failure_streak,
+            "circuit_breaker_open": self.circuit_breaker_open,
+            "session_is_valid": self.session_is_valid,
+            "connectivity_streak": self.connectivity_streak,
+            "connectivity_backoff_remaining": self.connectivity_backoff_remaining,
+            "resource_fetches": [f.to_dict() for f in self.resource_fetches],
+            "last_poll_timestamp": self.last_poll_timestamp,
+        }
 
 
 @dataclass

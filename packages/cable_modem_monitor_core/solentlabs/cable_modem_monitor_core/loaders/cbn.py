@@ -59,6 +59,7 @@ class CBNLoader:
         self._cookie_name = session_cookie_name
         self._timeout = timeout
         self._model = model
+        self.resource_fetches: list[tuple[str, float, int]] = []
 
     def fetch(
         self,
@@ -80,6 +81,7 @@ class CBNLoader:
             ``defusedxml.ElementTree.Element`` objects.
         """
         resources: dict[str, Any] = {}
+        self.resource_fetches = []
 
         for target in targets:
             element = self._fetch_one(target.path)
@@ -135,6 +137,7 @@ class CBNLoader:
             elapsed_ms,
             len(response.content),
         )
+        self.resource_fetches.append((fun, round(elapsed_ms, 1), len(response.content)))
 
         try:
             element: Element = DefusedET.fromstring(response.text)

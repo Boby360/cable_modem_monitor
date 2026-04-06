@@ -169,7 +169,7 @@ class TestAuthContextUpdate:
 
         with (
             patch.object(collector._auth_manager, "authenticate", return_value=mock_result),
-            patch.object(collector, "_load_resources", return_value={}),
+            patch.object(collector, "_load_resources", return_value=({}, [])),
             patch.object(collector, "_parse", return_value={"downstream": [], "upstream": [], "system_info": {}}),
         ):
             result = collector.execute()
@@ -224,9 +224,10 @@ class TestHnapResourceLoading:
         with patch("solentlabs.cable_modem_monitor_core.loaders.hnap.HNAPLoader") as mock_loader_cls:
             mock_loader = MagicMock()
             mock_loader.fetch.return_value = {"hnap_data": "ok"}
+            mock_loader.resource_fetches = [("/HNAP1/", 50.0, 1024)]
             mock_loader_cls.return_value = mock_loader
 
-            result = collector._load_hnap_resources()
+            resources, fetches = collector._load_hnap_resources()
 
         mock_loader_cls.assert_called_once_with(
             session=collector._session,
@@ -235,7 +236,9 @@ class TestHnapResourceLoading:
             hmac_algorithm="md5",
             timeout=10,
         )
-        assert result == {"hnap_data": "ok"}
+        assert resources == {"hnap_data": "ok"}
+        assert len(fetches) == 1
+        assert fetches[0].path == "/HNAP1/"
 
     def test_hnap_loader_with_sha256(self) -> None:
         """HNAP loader uses sha256 when config specifies it."""
@@ -246,6 +249,7 @@ class TestHnapResourceLoading:
 
         with patch("solentlabs.cable_modem_monitor_core.loaders.hnap.HNAPLoader") as mock_loader_cls:
             mock_loader_cls.return_value.fetch.return_value = {}
+            mock_loader_cls.return_value.resource_fetches = []
             collector._load_hnap_resources()
 
         assert mock_loader_cls.call_args[1]["hmac_algorithm"] == "sha256"
@@ -259,6 +263,7 @@ class TestHnapResourceLoading:
 
         with patch("solentlabs.cable_modem_monitor_core.loaders.hnap.HNAPLoader") as mock_loader_cls:
             mock_loader_cls.return_value.fetch.return_value = {}
+            mock_loader_cls.return_value.resource_fetches = []
             collector._load_hnap_resources()
 
         assert mock_loader_cls.call_args[1]["private_key"] == ""
@@ -291,7 +296,7 @@ class TestHnapLogout:
         modem_data: dict[str, Any] = {"downstream": [], "upstream": [], "system_info": {}}
         with (
             patch.object(collector, "authenticate", return_value=MagicMock(success=True)),
-            patch.object(collector, "_load_resources", return_value={}),
+            patch.object(collector, "_load_resources", return_value=({}, [])),
             patch.object(collector, "_parse", return_value=modem_data),
             patch("solentlabs.cable_modem_monitor_core.orchestration.collector.execute_action") as mock_action,
         ):
@@ -330,6 +335,7 @@ class TestUrlTokenExtraction:
         with patch("solentlabs.cable_modem_monitor_core.orchestration.collector.HTTPResourceLoader") as mock_loader_cls:
             mock_loader = MagicMock()
             mock_loader.fetch.return_value = {}
+            mock_loader.resource_fetches = []
             mock_loader_cls.return_value = mock_loader
 
             with patch(
@@ -356,6 +362,7 @@ class TestUrlTokenExtraction:
         with patch("solentlabs.cable_modem_monitor_core.orchestration.collector.HTTPResourceLoader") as mock_loader_cls:
             mock_loader = MagicMock()
             mock_loader.fetch.return_value = {}
+            mock_loader.resource_fetches = []
             mock_loader_cls.return_value = mock_loader
 
             with patch(

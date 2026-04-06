@@ -93,7 +93,12 @@ class _MockHandler(BaseHTTPRequestHandler):
 
         # Non-login request — check auth
         if not auth.is_authenticated(headers):
-            self._send_response(401, [], "Unauthorized")
+            challenge = auth.get_challenge_response()
+            self._send_response(
+                challenge.status,
+                challenge.headers,
+                challenge.body,
+            )
             return
 
         # Auth handler route override (HNAP merged data response)

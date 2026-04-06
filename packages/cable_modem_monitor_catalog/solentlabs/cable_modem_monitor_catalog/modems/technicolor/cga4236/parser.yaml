@@ -153,3 +153,10 @@ system_info:
           field: memory_free
           type: string
           path: "data"
+
+computed:
+  memory_used_pct:
+    operation: percent_used
+    inputs:
+      total: memory_total
+      free: memory_free

@@ -111,6 +111,16 @@ class TestResourceFetch:
         assert fetch.duration_ms == 800.0
         assert fetch.size_bytes == 12480
 
+    def test_to_dict(self) -> None:
+        """to_dict returns all fields as a plain dict."""
+        fetch = ResourceFetch(path="/status.html", duration_ms=800.0, size_bytes=12480)
+        result = fetch.to_dict()
+        assert result == {
+            "path": "/status.html",
+            "duration_ms": 800.0,
+            "size_bytes": 12480,
+        }
+
 
 class TestHealthInfo:
     """HealthInfo probe results."""
@@ -161,6 +171,55 @@ class TestOrchestratorDiagnostics:
         )
         assert len(metrics.resource_fetches) == 2
         assert metrics.poll_duration == 2.5
+
+    def test_to_dict_initial_state(self) -> None:
+        """to_dict serializes all fields including empty resource_fetches."""
+        metrics = OrchestratorDiagnostics(
+            poll_duration=None,
+            auth_failure_streak=0,
+            circuit_breaker_open=False,
+            session_is_valid=False,
+        )
+        result = metrics.to_dict()
+        assert result == {
+            "poll_duration": None,
+            "auth_failure_streak": 0,
+            "circuit_breaker_open": False,
+            "session_is_valid": False,
+            "connectivity_streak": 0,
+            "connectivity_backoff_remaining": 0,
+            "resource_fetches": [],
+            "last_poll_timestamp": None,
+        }
+
+    def test_to_dict_with_fetches(self) -> None:
+        """to_dict serializes nested ResourceFetch objects."""
+        fetches = [
+            ResourceFetch("/status.html", 800.0, 12480),
+            ResourceFetch("/info.html", 1200.0, 8192),
+        ]
+        metrics = OrchestratorDiagnostics(
+            poll_duration=2.5,
+            auth_failure_streak=1,
+            circuit_breaker_open=False,
+            session_is_valid=True,
+            connectivity_streak=3,
+            connectivity_backoff_remaining=2,
+            resource_fetches=fetches,
+            last_poll_timestamp=1234567.89,
+        )
+        result = metrics.to_dict()
+        assert result["poll_duration"] == 2.5
+        assert result["auth_failure_streak"] == 1
+        assert result["connectivity_streak"] == 3
+        assert result["connectivity_backoff_remaining"] == 2
+        assert result["last_poll_timestamp"] == 1234567.89
+        assert len(result["resource_fetches"]) == 2
+        assert result["resource_fetches"][0] == {
+            "path": "/status.html",
+            "duration_ms": 800.0,
+            "size_bytes": 12480,
+        }
 
 
 class TestRestartResult:

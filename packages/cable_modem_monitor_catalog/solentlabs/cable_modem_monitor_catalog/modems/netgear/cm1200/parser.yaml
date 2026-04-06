@@ -142,12 +142,26 @@ system_info:
     - format: javascript
       resource: "/DocsisStatus.htm"
       functions:
+        # InitTagValue has a documented 11-value format (indices 0-10):
+        #   0: Acquire DS Channel  1: DS Comment  2: Connectivity State
+        #   3: Connectivity Comment ("Operational")  4: Boot State
+        #   5: Boot Comment  6: Config File  7: Config Comment
+        #   8: Security  9: Security Comment  10: Current System Time
+        #
+        # Both HAR captures show an extended 17-value format (indices 0-16)
+        # with undocumented fields at indices 11-16, including system_uptime
+        # at index 14. If firmware returns the shorter 11-value format,
+        # the parser gracefully skips the out-of-range offset.
         - name: "InitTagValue"
           delimiter: "|"
           fields:
+            # Index 3 is the human-readable "Comment" column
+            # ("Operational"), matching the docsis_status convention
+            # across the fleet. Index 2 is the terse code ("OK").
             - offset: 3
               field: docsis_status
               type: string
+            # Index 14 — extended format only (see comment above)
             - offset: 14
               field: system_uptime
               type: string

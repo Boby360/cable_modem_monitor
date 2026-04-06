@@ -2138,6 +2138,76 @@ sections are extracted and parser.py hooks have run. Results are
 merged into `system_info` alongside channel counts, before the
 coordinator returns `ModemData` to the collector.
 
+## Computed (Derived system_info Fields)
+
+Optional section declaring fields derived from other system_info fields.
+Runs after aggregate computation. Like aggregates, uses `setdefault`
+— native values win.
+
+```yaml
+computed:
+  memory_used_pct:
+    operation: percent_used
+    inputs:
+      total: memory_total
+      free: memory_free
+```
+
+| Field | Type | Required | Description |
+|-------|------| :--------: |-------------|
+| `operation` | literal | yes | Named operation. Currently only `percent_used`. |
+| `inputs` | dict | yes | Maps operation parameter names to system_info field names |
+| `precision` | integer | no | Decimal places for numeric results (default 1) |
+
+**Operations:** Only `percent_used` is supported. Expects inputs
+`total` and `free`. Computes `(total - free) / total * 100`. Skipped
+when either input is missing, non-numeric, or total is zero. Values
+with trailing units (e.g., `"524288 kB"`) are parsed by stripping the
+suffix. New operations define their own expected input keys.
+
+**Why not parser.py hooks?** Hooks work but don't scale — every modem
+with memory fields would need its own parser.py. Declarative computed
+fields keep the derivation visible in parser.yaml alongside the field
+mappings that produce the inputs.
+
+**Precedence rule:** Same as aggregates. If parser.yaml maps a native
+`system_info` field with the same name, the native value wins.
+
+### System Info Field Tiers
+
+system_info fields are organized into tiers that determine how they
+surface as HA entities.
+
+**Tier 1 — Canonical (4 fields):** `software_version`, `hardware_version`,
+`system_uptime`, `docsis_status`. Defined in `SYSTEM_INFO_FIELDS`
+(field_registry.py). Always expected. Drive core behavior (status
+derivation, device info, uptime sensors).
+
+**Tier 2 — Dedicated sensor classes:** Fields with specialized HA
+entity behavior (device_class, state_class, unit conversion).
+Currently: software_version, system_uptime, channel counts, error
+totals. Elevation criteria:
+
+- Natural HA device_class (temperature, data_size, percentage)
+- Multiple modems expose it
+- Benefits from unit parsing or state_class
+- Users would expect it as a first-class entity
+
+**Tier 3 — Pass-through:** All remaining fields. Each gets a generic
+`SystemInfoFieldSensor` (icon: `mdi:information-outline`, value as-is).
+New system_info fields automatically appear as Tier 3 sensors —
+no code change needed.
+
+**Watchlist (Tier 3, candidates for future elevation):**
+
+- `board_temperature` (1 modem) — strong Tier 2 candidate when a
+  second modem surfaces it
+- `connected_devices` (1 modem) — good metric with state_class=MEASUREMENT
+- `memory_used_pct` (computed, 1 modem) — percentage with device_class
+
+Fields like `serial_number` and `mac_address` are PII-adjacent and
+should remain Tier 3.
+
 ---
 
 ## Performance Characteristics
