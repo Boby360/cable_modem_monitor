@@ -9,7 +9,8 @@ For architecture, specs, and field definitions, see the
 
 | Document | Covers |
 |----------|--------|
-| [INTAKE_PIPELINE.md](INTAKE_PIPELINE.md) | Modem intake workflow — HAR to catalog entry |
+| [INTAKE_PIPELINE.md](INTAKE_PIPELINE.md) | Pipeline overview — who does what, extension points, fleet patterns |
+| [MODEM_INTAKE_WORKFLOW.md](MODEM_INTAKE_WORKFLOW.md) | Operator workflow — step-by-step instructions with code snippets |
 | [MOCK_SERVER.md](MOCK_SERVER.md) | Mock server for testing catalog entries |
 
 **Note:** `FIELD_REGISTRY.md` and `VERIFICATION_STATUS.md` have moved to

@@ -81,34 +81,34 @@ loader behavior per transport, and URL construction details.
 - Returns status codes: `online`, `auth_failed`, `parser_issue`,
   `unreachable`, `no_signal`
 
-### Derived Fields
+---
 
-The parser coordinator enriches `system_info` with fields derived
-from parsed channel data. These appear in `modem_data.system_info`
-before the orchestrator sees the data.
+## Poll Cycle
 
-**Channel counts** (always computed by coordinator):
+```text
+Each poll:
+ 1. Orchestrator: circuit breaker open? → return auth_failed.
+ 2. Health recovery: if health monitor reports RESPONSIVE and
+    connectivity backoff > 0, clear backoff and streak.
+ 3. Orchestrator: connectivity backoff active? → decrement. If still
+    > 0 after decrement, return unreachable. If cleared to 0, proceed.
+ 4. Orchestrator invokes ModemDataCollector:
+    a. Auth Manager: session valid? → reuse. Expired? → login.
+    b. Resource Loader: fetch all pages using authenticated session.
+       Build resource dict.
+    c. Parser: parse_resources(resources) → channels + system info.
+    d. Auth Manager: logout if single-session modem.
+ 5. Orchestrator: check ModemDataCollector result.
+    Success → reset auth failure streak, reset connectivity state, derive status.
+    Auth failure (AUTH_FAILED/AUTH_LOCKOUT) → trip circuit breaker immediately.
+    Auth failure (LOAD_AUTH) → increment streak, trip at threshold.
+    Connectivity failure → increment connectivity streak, set exponential backoff.
+    Other failure → apply signal policy.
+```
 
-- `downstream_channel_count` — `len(downstream)`, always present
-- `upstream_channel_count` — `len(upstream)`, always present
-- If the parser maps native channel counts from the modem's web UI,
-  the native value takes precedence.
+---
 
-**Aggregate fields** (declared in parser.yaml `aggregate` section):
-
-- e.g., `total_corrected` — `sum(corrected)` across scoped channels
-- Scope can be a direction (`downstream`) or type-qualified
-  (`downstream.qam`, `downstream.ofdm`)
-- Only computed when declared — parsers without an `aggregate` section
-  produce no aggregate fields
-- Modems with native totals in their web UI map them as `system_info`
-  fields in parser.yaml instead
-- Consumers read from `system_info` regardless of source
-
-See [PARSING_SPEC.md](PARSING_SPEC.md#aggregate-derived-system_info-fields)
-for the full schema.
-
-### Status Derivation
+## Status Derivation
 
 The orchestrator derives two status fields after each poll:
 
@@ -149,28 +149,85 @@ for the HA implementation's cascade rules.
 
 ---
 
-## Poll Cycle
+## Derived Fields
 
-```text
-Each poll:
- 1. Orchestrator: circuit breaker open? → return auth_failed.
- 2. Health recovery: if health monitor reports RESPONSIVE and
-    connectivity backoff > 0, clear backoff and streak.
- 3. Orchestrator: connectivity backoff active? → decrement. If still
-    > 0 after decrement, return unreachable. If cleared to 0, proceed.
- 4. Orchestrator invokes ModemDataCollector:
-    a. Auth Manager: session valid? → reuse. Expired? → login.
-    b. Resource Loader: fetch all pages using authenticated session.
-       Build resource dict.
-    c. Parser: parse_resources(resources) → channels + system info.
-    d. Auth Manager: logout if single-session modem.
- 5. Orchestrator: check ModemDataCollector result.
-    Success → reset auth failure streak, reset connectivity state, derive status.
-    Auth failure (AUTH_FAILED/AUTH_LOCKOUT) → trip circuit breaker immediately.
-    Auth failure (LOAD_AUTH) → increment streak, trip at threshold.
-    Connectivity failure → increment connectivity streak, set exponential backoff.
-    Other failure → apply signal policy.
-```
+The parser coordinator enriches `system_info` with fields derived
+from parsed channel data. These appear in `modem_data.system_info`
+before the orchestrator sees the data.
+
+**Channel counts** (always computed by coordinator):
+
+- `downstream_channel_count` — `len(downstream)`, always present
+- `upstream_channel_count` — `len(upstream)`, always present
+- If the parser maps native channel counts from the modem's web UI,
+  the native value takes precedence.
+
+**Aggregate fields** (declared in parser.yaml `aggregate` section):
+
+- e.g., `total_corrected` — `sum(corrected)` across scoped channels
+- Scope can be a direction (`downstream`) or type-qualified
+  (`downstream.qam`, `downstream.ofdm`)
+- Only computed when declared — parsers without an `aggregate` section
+  produce no aggregate fields
+- Modems with native totals in their web UI map them as `system_info`
+  fields in parser.yaml instead
+- Consumers read from `system_info` regardless of source
+
+See [PARSING_SPEC.md](PARSING_SPEC.md#aggregate-derived-system_info-fields)
+for the full schema.
+
+---
+
+## Design Rules
+
+1. **All-or-nothing page loading.** If any page fetch fails, the entire
+   poll fails. Partial data masks root causes — a missing page could mean
+   wrong URL, changed firmware, or auth redirect. Log which page failed,
+   the error type, and HTTP status if available. Previous `ModemData`
+   persists in platform output until the next successful poll.
+
+2. **Exponential backoff on connectivity failures.** When the modem is
+   unreachable, connectivity backoff avoids wasting polls on timeouts.
+   The backoff counter is set to `min(2^(streak-1), 6)` and decremented
+   each poll cycle. The poll proceeds when the counter reaches 0
+   (so counter=N skips N-1 polls): first failure retries immediately,
+   then skip 1, 3, up to 5 polls. Any successful poll or non-
+   connectivity failure (auth error, parse error) resets the
+   connectivity state. User-initiated refresh (Update Modem Data
+   button) calls `reset_connectivity()` to bypass backoff and attempt
+   immediately. Connectivity failures never count
+   toward the auth circuit breaker.
+
+3. **No within-poll retries.** Every failure mode waits for the next
+   scheduled poll cycle. This is inherent rate limiting — even at the
+   minimum 30-second cadence, the modem gets breathing room between
+   attempts.
+
+4. **Constant backoff on lockout, circuit breaker on persistence.**
+   `LoginLockoutError` triggers 3-poll suppression (constant, no
+   escalation). If auth failures persist across multiple lockout
+   cycles, the circuit breaker opens and polling stops entirely —
+   the user must reconfigure credentials to resume. Session reuse is
+   the primary defense; backoff is the safety net; circuit breaker is
+   the last resort. (Evidence: HNAP modem firmware has confirmed
+   `LOCKUP`/`REBOOT` states — see `ORCHESTRATION_SPEC.md` § Auth
+   Circuit Breaker for full use-case walkthrough.)
+
+5. **Auth strategies must validate success.** A 200 OK response does not
+   mean authentication succeeded. Each strategy validates that the
+   expected session artifacts were established (cookies set, token
+   returned, expected redirect). If validation fails, the strategy
+   returns `AuthResult.FAILURE` with diagnostic details — it does not
+   assume success. Auth failures are the #1 onboarding issue; accurate
+   signaling is critical.
+
+6. **Each poll is independent.** The orchestrator does not distinguish
+   "transient" from "permanent" failure. If the modem responds, it's
+   `online`. If it doesn't, it's `unreachable`. Cross-poll state is
+   limited to: auth backoff, connectivity backoff, and session. The
+   `unreachable → online`
+   transition is logged with session state for diagnostics (see Modem
+   Restart, Unplanned restart).
 
 ---
 
@@ -421,57 +478,6 @@ Every signal a protocol layer can emit and the orchestrator's policy:
 | Channels found | Parser | Build response, reset auth streak | `online` |
 | Zero channels | Parser | Derive status from system_info | `no_signal` |
 
-### Design Rules
-
-1. **All-or-nothing page loading.** If any page fetch fails, the entire
-   poll fails. Partial data masks root causes — a missing page could mean
-   wrong URL, changed firmware, or auth redirect. Log which page failed,
-   the error type, and HTTP status if available. Previous `ModemData`
-   persists in platform output until the next successful poll.
-
-2. **Exponential backoff on connectivity failures.** When the modem is
-   unreachable, connectivity backoff avoids wasting polls on timeouts.
-   The backoff counter is set to `min(2^(streak-1), 6)` and decremented
-   each poll cycle. The poll proceeds when the counter reaches 0
-   (so counter=N skips N-1 polls): first failure retries immediately,
-   then skip 1, 3, up to 5 polls. Any successful poll or non-
-   connectivity failure (auth error, parse error) resets the
-   connectivity state. User-initiated refresh (Update Modem Data
-   button) calls `reset_connectivity()` to bypass backoff and attempt
-   immediately. Connectivity failures never count
-   toward the auth circuit breaker.
-
-3. **No within-poll retries.** Every failure mode waits for the next
-   scheduled poll cycle. This is inherent rate limiting — even at the
-   minimum 30-second cadence, the modem gets breathing room between
-   attempts.
-
-4. **Constant backoff on lockout, circuit breaker on persistence.**
-   `LoginLockoutError` triggers 3-poll suppression (constant, no
-   escalation). If auth failures persist across multiple lockout
-   cycles, the circuit breaker opens and polling stops entirely —
-   the user must reconfigure credentials to resume. Session reuse is
-   the primary defense; backoff is the safety net; circuit breaker is
-   the last resort. (Evidence: HNAP modem firmware has confirmed
-   `LOCKUP`/`REBOOT` states — see `ORCHESTRATION_SPEC.md` § Auth
-   Circuit Breaker for full use-case walkthrough.)
-
-5. **Auth strategies must validate success.** A 200 OK response does not
-   mean authentication succeeded. Each strategy validates that the
-   expected session artifacts were established (cookies set, token
-   returned, expected redirect). If validation fails, the strategy
-   returns `AuthResult.FAILURE` with diagnostic details — it does not
-   assume success. Auth failures are the #1 onboarding issue; accurate
-   signaling is critical.
-
-6. **Each poll is independent.** The orchestrator does not distinguish
-   "transient" from "permanent" failure. If the modem responds, it's
-   `online`. If it doesn't, it's `unreachable`. Cross-poll state is
-   limited to: auth backoff, connectivity backoff, and session. The
-   `unreachable → online`
-   transition is logged with session state for diagnostics (see Modem
-   Restart, Unplanned restart).
-
 ### Diagnostics for Remote Troubleshooting
 
 When a poll fails with `auth_failed` or `parser_issue`, the orchestrator
@@ -491,19 +497,3 @@ captures structured diagnostic data for the user to share in a bug report:
 This data is exposed via HA's integration diagnostics download (JSON).
 The user downloads the file and attaches it to a GitHub issue — no
 log scraping required.
-
----
-
-## Diagnostics
-
-The orchestrator exposes operational diagnostics via `diagnostics()` →
-`OrchestratorDiagnostics`. See
-[ORCHESTRATION_SPEC.md](ORCHESTRATION_SPEC.md#data-models) § Data Models
-for field definitions.
-
-Health probe latencies (`icmp_latency_ms`, `http_latency_ms`) are on
-`HealthInfo`, not `OrchestratorDiagnostics` — different cadence, different
-model.
-
-These are available as attributes or diagnostic data, not separate
-entities.

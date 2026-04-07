@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from solentlabs.cable_modem_monitor_core.mcp.analysis.types import FleetPatterns
 
 CATALOG_ROOT = Path(__file__).resolve().parent.parent / ("solentlabs/cable_modem_monitor_catalog/modems")
 
@@ -278,13 +279,17 @@ def _run_validate(har_path: Path, result: ModemResult) -> bool:
     return True
 
 
-def _run_analyze(har_path: Path, result: ModemResult) -> dict[str, Any] | None:
+def _run_analyze(
+    har_path: Path,
+    result: ModemResult,
+    fleet: FleetPatterns | None = None,
+) -> dict[str, Any] | None:
     """Run analyze_har. Returns analysis dict or None on failure."""
     from solentlabs.cable_modem_monitor_core.mcp.analyze_har import (
         analyze_har,
     )
 
-    analysis = analyze_har(str(har_path))
+    analysis = analyze_har(str(har_path), fleet=fleet)
     if analysis.hard_stops:
         result.stage_failed = "analyze_har"
         result.error = "; ".join(analysis.hard_stops)
@@ -296,6 +301,7 @@ def _run_generate(
     analysis_data: dict[str, Any],
     modem_dir: Path,
     result: ModemResult,
+    fleet: FleetPatterns | None = None,
 ) -> tuple[str | None, str | None]:
     """Run generate_config. Returns (modem_yaml, parser_yaml) or (None, None)."""
     from solentlabs.cable_modem_monitor_core.mcp.enrich_metadata import (
@@ -307,7 +313,7 @@ def _run_generate(
 
     user_meta = _extract_metadata(modem_dir)
     enriched = enrich_metadata(analysis_data, user_input=user_meta)
-    config = generate_config(analysis_data, enriched.metadata)
+    config = generate_config(analysis_data, enriched.metadata, fleet=fleet)
     if config.validation and not config.validation.valid:
         result.stage_failed = "generate_config"
         result.error = "; ".join(config.validation.errors)
@@ -372,6 +378,7 @@ def run_modem(
     har_path: Path,
     modem_dir: Path,
     verbose: bool = False,
+    fleet: FleetPatterns | None = None,
 ) -> ModemResult:
     """Run the full pipeline regression for one modem HAR."""
     result = ModemResult(modem=modem_id, har_file=har_path.name)
@@ -380,11 +387,11 @@ def run_modem(
         if not _run_validate(har_path, result):
             return result
 
-        analysis_data = _run_analyze(har_path, result)
+        analysis_data = _run_analyze(har_path, result, fleet=fleet)
         if analysis_data is None:
             return result
 
-        modem_yaml, parser_yaml = _run_generate(analysis_data, modem_dir, result)
+        modem_yaml, parser_yaml = _run_generate(analysis_data, modem_dir, result, fleet=fleet)
         if modem_yaml is None:
             return result
 
@@ -732,12 +739,22 @@ def main() -> None:
         print("No modems found.")
         sys.exit(1)
 
+    # Scan fleet patterns once — feeds into analyze_har and generate_config
+    from solentlabs.cable_modem_monitor_catalog.fleet_scanner import scan_fleet
+
+    fleet = scan_fleet(CATALOG_ROOT)
+    print(
+        f"Fleet patterns: {len(fleet.selector_directions)} selectors, "
+        f"{len(fleet.system_info_labels)} labels, "
+        f"{len(fleet.aggregate_fields)} aggregates"
+    )
+
     print(f"Running pipeline regression on {len(modems)} HAR files...\n")
 
     results: list[ModemResult] = []
     for modem_id, har_path, modem_dir in modems:
         print(f"  {modem_id} ({har_path.name})")
-        r = run_modem(modem_id, har_path, modem_dir, verbose=args.verbose)
+        r = run_modem(modem_id, har_path, modem_dir, verbose=args.verbose, fleet=fleet)
         results.append(r)
 
     _print_summary(results)

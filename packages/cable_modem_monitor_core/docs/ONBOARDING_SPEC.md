@@ -33,16 +33,14 @@ review, commit authorization).
 |---------|----------------|
 | [Inputs](#inputs) | What the onboarding process requires |
 | [Outputs](#outputs) | Artifacts generated (modem.yaml, parser.yaml, etc.) |
+| [Workflow](#workflow) | End-to-end onboarding flow (capture → analysis → testing → review) |
 | [HAR Validation Gate](#har-validation-gate) | Three-step HAR quality check before proceeding |
 | [Decision Tree](#decision-tree) | 7-phase detection: transport, auth, session, format, fields |
 | [parser.py Decision](#parserpy-decision) | When code post-processing is needed vs config-only |
-| [Package Ownership](#package-ownership) | What goes in Core vs Catalog |
-| [Catalog Extension](#catalog-extension-fleet-augmented-analysis) | Fleet scanner, enrichment, trial parser |
-| [Test Harness (Core)](#test-harness-core) | HAR replay, golden files, test discovery |
-| [MCP Tools](#mcp-tools) | Tool contracts: validate_har, analyze_har, enrich_metadata, generate_config, write_modem_package, etc. |
-| [Validation and Testing](#validation-and-testing) | Static validation and end-to-end test flow |
 | [Error Handling](#error-handling) | Hard stops, warnings, confidence annotations |
-| [Workflow](#workflow) | Full 12-phase onboarding flow |
+| [MCP Tools](#mcp-tools) | Tool contracts: validate_har, analyze_har, enrich_metadata, generate_config, etc. |
+| [Architecture](#architecture) | Package ownership, fleet patterns, Core vs Catalog |
+| [Testing](#testing) | HARMockServer, golden files, static validation, test discovery |
 | [Transport Constraint Reference](#transport-constraint-reference) | Auth/session/format valid per transport |
 | [Examples](#examples) | Worked examples: HTTP form, HNAP, HTTP JSON |
 | [Assumptions and Limitations](#assumptions-and-limitations) | Scope boundaries and known gaps |
@@ -53,7 +51,7 @@ review, commit authorization).
 
 | Input | Type | Required | Description |
 |-------|------|:--------:|-------------|
-| HAR file | `.har` file path | yes | Browser HAR capture of modem web UI interaction |
+| HAR file | `.har` file path | yes | Capture from [har-capture](https://github.com/solentlabs/har-capture) — records the full HTTP conversation (auth flows, API calls, page content) with built-in PII redaction |
 | Manufacturer | string | yes | Modem manufacturer (e.g., "Arris", "Motorola") |
 | Model | string | yes | Model identifier (e.g., "SB8200", "MB7621") |
 | GitHub issue | integer | yes | Issue number for `references` and change tracking |
@@ -83,6 +81,112 @@ package, following MODEM_DIRECTORY_SPEC.md.
 | Parser code | `parser.py` | only if declarative extraction is insufficient |
 | Golden file | `test_data/modem.expected.json` | yes |
 | HAR copy | `test_data/modem.har` | yes (sanitized copy) |
+
+---
+
+## Workflow
+
+### Full onboarding flow
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│ HAR Capture (user + har-capture)                        │
+│ https://github.com/solentlabs/har-capture               │
+├─────────────────────────────────────────────────────────┤
+│ 1. User runs har-capture against modem IP               │
+│ 2. har-capture drives the browser: login, navigate,     │
+│    capture all HTTP traffic, close session              │
+│ 3. Built-in PII redaction scrubs credentials, MACs,     │
+│    serial numbers from the capture                      │
+│ 4. User reviews HAR if needed                           │
+└────────────────────────┬────────────────────────────────┘
+                         ↓ sanitized .har file
+┌─────────────────────────────────────────────────────────┐
+│ Onboarding (LLM + MCP tools)                            │
+├─────────────────────────────────────────────────────────┤
+│ 5.  LLM calls validate_har                              │
+│ 6.  LLM calls scan_fleet (Catalog) → FleetPatterns      │
+│ 7.  LLM calls analyze_har(fleet=fleet)                  │
+│     ├── hard_stops? → present to user, resolve          │
+│     └── ambiguous HTML format? → LLM reads HAR          │
+│         response bodies, picks format                   │
+│ 8.  LLM calls enrich_metadata (with analysis +          │
+│     manufacturer + model)                               │
+│     ├── reviews inferred fields                         │
+│     ├── missing fields? → LLM does web search           │
+│     │   (chipset, brands, ISPs, model aliases)          │
+│     └── warnings? → LLM resolves conflicts              │
+│ 9.  LLM calls generate_config(fleet=fleet) (with        │
+│     analysis + enriched metadata) — validates before    │
+│     returning                                           │
+│     ├── validation errors? → LLM fixes, retries         │
+│     └── valid → continue                                │
+│ 10. LLM calls generate_golden_file                      │
+│     └── sanity checks channel counts with user          │
+│ 11. LLM calls write_modem_package (configs + golden     │
+│     file + HAR → catalog directory)                     │
+│ 12. LLM calls run_tests                                 │
+│     ├── failures? → LLM diagnoses, fixes config,        │
+│     │   re-runs (loop until green)                      │
+│     └── pass → continue                                 │
+│ 13. LLM commits and pushes → CI runs tests again        │
+└────────────────────────┬────────────────────────────────┘
+                         ↓ PR ready
+┌─────────────────────────────────────────────────────────┐
+│ Review and Deploy                                       │
+├─────────────────────────────────────────────────────────┤
+│ 14. Admin reviews PR changes                            │
+│ 15. PR merged → config available on next deployment     │
+└─────────────────────────────────────────────────────────┘
+```
+
+### What lives where
+
+| Responsibility | Package | Owner |
+|----------------|---------|-------|
+| HAR capture + PII redaction | [har-capture](https://github.com/solentlabs/har-capture) | User |
+| HAR validation | Core (MCP: `validate_har`) | Tool |
+| Fleet pattern scanning | Catalog (`fleet_scanner.scan_fleet`) | Tool |
+| Transport / auth / format detection | Core (MCP: `analyze_har`) | Tool |
+| Ambiguity resolution | — | LLM → User |
+| Metadata inference + gap detection | Core (MCP: `enrich_metadata`) | Tool |
+| Metadata gaps (web search) | — | LLM (web search) |
+| Config generation + validation | Core (MCP: `generate_config`) | Tool |
+| Golden file generation | Core (MCP: `generate_golden_file`) | Tool |
+| File placement | Core (MCP: `write_modem_package`) | Tool |
+| End-to-end testing | Core (harness) + MCP: `run_tests` | Tool |
+| Test failure diagnosis + fixes | — | LLM |
+| Commit + push | — | LLM → User authorization |
+| CI test execution | Core (harness) via Catalog pytest | CI |
+| PR review + merge | — | Admin |
+
+### Why MCP, not a prompt-based workflow
+
+The onboarding process is mostly deterministic: parse HAR structure,
+match patterns to config fields, validate schemas, run tests. These
+steps should be **code, not prompts** — repeatable, testable, and not
+dependent on LLM reasoning for correctness.
+
+A prompt-based approach would embed the entire decision tree in natural
+language, re-derived by the LLM every invocation. An MCP server encodes
+the deterministic parts in Python, exposing structured tools that any
+MCP-compatible AI client can orchestrate. The LLM adds value where
+judgment is needed: resolving ambiguous HTML formats, searching the
+web for metadata, diagnosing test failures, and interacting with the
+user.
+
+| | Prompt-based | MCP |
+|---|---|---|
+| Decision tree | Re-derived from spec each time | Encoded in Python, tested |
+| HAR parsing | LLM reads JSON, hopes to count correctly | Code parses deterministically |
+| Pydantic validation | LLM calls validator, interprets output | Tool returns structured errors |
+| Test execution | LLM runs pytest, parses terminal output | Tool returns structured results |
+| Repeatability | Varies by invocation | Deterministic for same input |
+| Testability | Cannot unit test a prompt | Standard Python tests |
+
+The MCP server and test harness both live in Core. Consumers include
+any MCP-compatible AI client (Claude Code, Gemini CLI, Cursor, etc.)
+and Catalog's CI (via pytest). Both are internal to this project.
 
 ---
 
@@ -816,241 +920,43 @@ coordinator skips missing hooks.
 
 ---
 
-## Package Ownership
+## Error Handling
 
-Both the MCP server and the test harness live in **Core**. Catalog
-provides modem data; Core provides the infrastructure to analyze,
-validate, and test it.
+### Hard stops (do not proceed)
 
-```text
-Core (solentlabs-cable-modem-monitor-core)
-├── Pipeline: auth → load → parse
-├── MCP server: onboarding tools (analyze, generate, validate)
-├── Test harness: HARMockServer, golden file comparison
-└── Pydantic validation models (dev dependency)
+| Condition | Message |
+|-----------|---------|
+| HAR is post-auth only (no login flow for authenticated modem) | "HAR appears to be post-auth only — first request returns 200 with data content and session cookies are present. Please recapture using incognito/private browsing." |
+| Auth mechanism cannot be determined | "Cannot determine auth mechanism from HAR. Observed: [list evidence]. Missing: [what's needed]. Please provide additional information or a more complete HAR capture." |
+| Transport ambiguous | "Cannot determine transport. HNAP markers (HNAP1 URL, SOAPAction, HNAP_AUTH header) were not found, but some data responses are ambiguous. Please confirm the modem's data transport mechanism." |
+| HAR has no data pages (only login flow) | "HAR contains login flow but no data page responses. Please recapture including navigation to the modem's status/signal pages after login." |
 
-Catalog (solentlabs-cable-modem-monitor-catalog)
-├── modems/{mfr}/{model}/modem.yaml
-├── modems/{mfr}/{model}/parser.yaml
-├── modems/{mfr}/{model}/parser.py          (optional)
-└── modems/{mfr}/{model}/test_data/
-    ├── modem.har
-    └── modem.expected.json
+### Warnings (proceed with flag)
+
+| Condition | Message |
+|-----------|---------|
+| `max_concurrent` unknown | "Cannot determine session concurrency limit from HAR. Defaulting to `max_concurrent: 0` (unlimited). Verify with modem documentation or contributor." |
+| No logout flow in HAR | "No logout endpoint observed in HAR. If this modem has single-session limits, a logout action will be needed." |
+| HMAC algorithm uncertain (HNAP) | "HNAP HMAC algorithm cannot be confirmed from HAR. Defaulting to `md5`. Verify with contributor." |
+| Restart not in HAR | "No restart flow observed in HAR. `actions.restart` omitted. Can be added later from modem documentation." |
+| parser.py generated | "parser.py was generated for: [reasons]. Review the post-processing logic for correctness." |
+
+### Confidence annotations
+
+The generated modem.yaml should include comments marking fields with
+low confidence:
+
+```yaml
+auth:
+  strategy: form
+  action: "/goform/login"          # from HAR: POST observed at this endpoint
+  username_field: "loginUsername"   # from HAR: form field name in POST body
+  password_field: "loginPassword"  # from HAR: form field name in POST body
+  encoding: base64                 # from HAR: password value appears base64-encoded
+
+session:
+  max_concurrent: 0                # UNVERIFIED: cannot determine from HAR alone
 ```
-
-**Why Core owns both:** The MCP tools exercise Core's pipeline logic
-(auth strategies, resource loaders, parser coordinator). The test
-harness validates that the pipeline produces correct output from HAR
-input. Both are consumers of Core's internals. Catalog just points
-Core's harness at its modem directories — no test logic in Catalog.
-
-**Dependency direction is preserved:** Catalog depends on Core. Core
-has no knowledge of specific modems. The test harness accepts a modem
-directory path and discovers the files it needs.
-
-### Catalog Extension: Fleet-Augmented Analysis
-
-Core's ``analyze_har`` works from first principles — hardcoded keyword
-patterns, field registries, and direction heuristics. The Catalog
-extends this with fleet-derived patterns learned from the 35+ existing
-``parser.yaml`` files.
-
-**Architecture:** Core defines the contract (``FleetPatterns``
-dataclass). Catalog populates it by scanning the fleet. Core's
-analyzer accepts it as an optional parameter and merges fleet patterns
-into its baseline detection.
-
-```text
-Core defines:
-  FleetPatterns (analysis/types.py)
-    selector_directions: dict[str, str]     # selector text → direction
-    system_info_labels: dict[str, tuple]    # label text → (field, tier)
-
-  analyze_har(har_path, fleet=None) → AnalysisResult
-
-Catalog provides:
-  fleet_scanner.scan_fleet(CATALOG_PATH) → FleetPatterns
-  trial_parser.trial_parse(har_path, parser_yaml) → TrialResult
-```
-
-**What fleet patterns augment:**
-
-| Phase | Baseline (Core) | Fleet augmentation (Catalog) |
-|-------|-----------------|------------------------------|
-| Table direction | Keyword matching ("downstream", "upstream") | Selector text from proven configs ("Signal Status (Codewords)" → downstream) |
-| System info labels | 17 hardcoded label→field mappings | 20+ labels learned from fleet ("firmware name" → firmware_name) |
-
-**Merge rules:** Fleet patterns augment, not override. Core's baseline
-maps apply first. Fleet adds entries only for labels/selectors that
-Core's baseline does not cover. This means a new modem gets the
-benefit of every previous modem's config without any manual registry
-maintenance.
-
-**Trial parser:** After analysis, the trial parser feeds HAR response
-bodies through Core's ``ModemParserCoordinator`` with a candidate
-``parser.yaml`` to validate that selectors find the right tables and
-field mappings extract non-empty values. This catches configuration
-errors before committing.
-
----
-
-## Test Harness (Core)
-
-Core provides a reusable test harness that takes a modem directory
-and runs the full pipeline against an `HARMockServer` — a local HTTP
-server that replays HAR-captured responses with auth simulation. The
-harness is consumed by:
-
-- The MCP `run_tests` tool (during onboarding)
-- Catalog's pytest suite (during CI)
-- Developers running tests locally
-- The standalone serve command for manual HA integration testing:
-  `python -m solentlabs.cable_modem_monitor_core.test_harness <modem_dir>`
-
-### HARMockServer
-
-Builds a local HTTP server from HAR entries. Each entry becomes a
-route that replays the recorded response.
-
-```text
-HAR entry:
-  request:  { method: GET, url: "/MotoConnection.asp", headers: [...] }
-  response: { status: 200, headers: [...], content: { text: "<html>..." } }
-
-      ↓ becomes
-
-Mock route:
-  GET /MotoConnection.asp → 200, <html>...
-```
-
-**Auth-aware replay:** The server handles auth flows statefully,
-not just serves responses by URL:
-
-1. **Login endpoint** returns success response only when credentials
-   match the HAR's recorded login request body
-2. **Session cookie** is set on successful login and required on
-   subsequent requests
-3. **Data pages** return 401/redirect if no valid session, 200 with
-   recorded content if session is valid
-4. **HNAP** validates full `HNAP_AUTH` HMAC signatures on all requests
-   (login phases and data requests). The mock uses deterministic
-   challenge values, so the expected private key and login password are
-   pre-computed. This catches HMAC computation bugs (wrong key, wrong
-   message format, wrong timestamp modulo), not just header presence.
-   The mock also merges all `GetMultipleHNAPs` HAR responses into a
-   single combined response — the HNAP loader sends one batched request,
-   but HAR captures contain multiple separate calls
-
-This is necessary because the pipeline under test performs real auth
-— if the server ignores auth, we're not testing the auth config.
-
-**Stateless fallback:** For `auth: none` modems, the server simply
-maps URL paths to responses with no session tracking.
-
-**Auth coverage:** All seven auth strategies have dedicated mock handlers
-including full PBKDF2 multi-round challenge-response and SJCL AES-CCM
-crypto validation.
-
-### Golden File Comparison
-
-After the pipeline produces `ModemData`, the harness compares it
-against the golden file (`test_data/modem.expected.json`).
-
-**Comparison rules:**
-
-- Deep equality on the full `ModemData` dict
-- Downstream and upstream channel lists are order-sensitive (channel
-  order should be deterministic from the same input)
-- System info fields are compared as a flat dict
-- On failure, output a structured diff showing exactly which fields
-  diverged, with both expected and actual values
-
-**Diff format example:**
-
-```text
-FAIL: modems/motorola/mb7621
-  downstream[3].frequency:
-    expected: 507000000
-    actual:   507
-    (likely missing Hz normalization)
-
-  upstream: expected 4 channels, got 3
-    missing: channel_id=4 (frequency=37700000)
-    (likely filter excluding valid channel)
-```
-
-### Test Discovery
-
-The harness discovers test cases from the Catalog directory structure:
-
-```text
-For each modems/{mfr}/{model}/test_data/ directory:
-  For each *.har file:
-    1. Find matching *.expected.json (same stem)
-    2. Find matching modem*.yaml (see config resolution below)
-    3. Find parser.yaml (or parser.py) in parent directory
-    4. Register as a test case
-```
-
-**Config resolution** (from MODEM_DIRECTORY_SPEC.md):
-
-- `modem.har` → uses `modem.yaml`
-- `modem-{name}.har` → look for `modem-{name}.yaml`; if not found,
-  fall back to `modem.yaml`
-
-### Test Execution Flow
-
-```text
-discover test case:
-  modem.har + modem.expected.json + modem.yaml + parser.yaml
-    ↓
-build HARMockServer from modem.har
-    ↓
-load modem config (modem.yaml → auth strategy, session, actions)
-load parser config (parser.yaml → extraction mappings)
-    ↓
-run pipeline against HARMockServer:
-  1. Auth strategy authenticates (login flow)
-  2. Resource loader fetches pages declared in parser.yaml
-  3. ModemParserCoordinator extracts ModemData
-  4. parser.py post-processing (if present)
-    ↓
-compare output against modem.expected.json
-    ↓
-pass / fail with structured diff
-```
-
-### Catalog's pytest integration
-
-Catalog's test suite is thin — it just points Core's harness at its
-modem directories:
-
-```python
-# packages/cable_modem_monitor_catalog/tests/conftest.py
-from solentlabs.cable_modem_monitor_core.test_harness import discover_modem_tests
-
-# Auto-discover all modem test cases from the catalog
-pytest_plugins = []
-
-def pytest_generate_tests(metafunc):
-    """Parametrize tests from modem directory discovery."""
-    if "modem_test_case" in metafunc.fixturenames:
-        cases = discover_modem_tests(CATALOG_MODEMS_PATH)
-        metafunc.parametrize("modem_test_case", cases, ids=lambda c: c.name)
-```
-
-```python
-# packages/cable_modem_monitor_catalog/tests/test_modems.py
-from solentlabs.cable_modem_monitor_core.test_harness import run_modem_test
-
-def test_modem_har_replay(modem_test_case):
-    """Each modem's HAR replay produces expected output."""
-    result = run_modem_test(modem_test_case)
-    assert result.passed, result.diff
-```
-
-No modem-specific test code in Catalog. Adding a modem means adding
-files to its directory — the test is automatic.
 
 ---
 
@@ -1219,8 +1125,11 @@ Takes the analysis result (from `analyze_har`) plus enriched metadata
 (from `enrich_metadata`) and produces modem.yaml and parser.yaml content.
 Runs Pydantic validation and cross-file consistency checks before returning.
 
-**Input:** Analysis result + metadata (manufacturer, model, hardware, brands, etc.)
+**Input:** Analysis result + metadata (manufacturer, model, hardware, brands, etc.) + optional ``fleet`` (``FleetPatterns`` from Catalog scanner)
 **Output:** `{ modem_yaml: str, parser_yaml: str, parser_py: str | null, validation: { valid: bool, errors: [] } }`
+
+When ``fleet`` is provided, ``build_parser_dict`` uses fleet aggregate
+patterns to augment auto-generated aggregate fields.
 
 Does **not** write files — returns content for the LLM to review and
 place. If validation fails, returns errors so the LLM can fix and retry.
@@ -1312,7 +1221,253 @@ edits.
 
 ---
 
-## Validation and Testing
+## Architecture
+
+### Package Ownership
+
+Both the MCP server and the test harness live in **Core**. Catalog
+provides modem data; Core provides the infrastructure to analyze,
+validate, and test it.
+
+```text
+Core (solentlabs-cable-modem-monitor-core)
+├── Pipeline: auth → load → parse
+├── MCP server: onboarding tools (analyze, generate, validate)
+├── Test harness: HARMockServer, golden file comparison
+└── Pydantic validation models (dev dependency)
+
+Catalog (solentlabs-cable-modem-monitor-catalog)
+├── modems/{mfr}/{model}/modem.yaml
+├── modems/{mfr}/{model}/parser.yaml
+├── modems/{mfr}/{model}/parser.py          (optional)
+└── modems/{mfr}/{model}/test_data/
+    ├── modem.har
+    └── modem.expected.json
+```
+
+**Why Core owns both:** The MCP tools exercise Core's pipeline logic
+(auth strategies, resource loaders, parser coordinator). The test
+harness validates that the pipeline produces correct output from HAR
+input. Both are consumers of Core's internals. Catalog just points
+Core's harness at its modem directories — no test logic in Catalog.
+
+**Dependency direction is preserved:** Catalog depends on Core. Core
+has no knowledge of specific modems. The test harness accepts a modem
+directory path and discovers the files it needs.
+
+### Catalog Extension: Fleet-Augmented Analysis
+
+Core's ``analyze_har`` works from first principles — hardcoded keyword
+patterns, field registries, and direction heuristics. The Catalog
+extends this with fleet-derived patterns learned from the 35+ existing
+``parser.yaml`` files.
+
+**Architecture:** Core defines the contract (``FleetPatterns``
+dataclass). Catalog populates it by scanning the fleet. Core's
+analyzer accepts it as an optional parameter and merges fleet patterns
+into its baseline detection.
+
+```text
+Core defines:
+  FleetPatterns (analysis/types.py)
+    selector_directions: dict[str, str]           # selector text → direction
+    system_info_labels: dict[str, tuple[str,int]] # label text → (field, tier)
+    system_info_ids: dict[str, tuple[str,int]]    # CSS ID → (field, tier)
+    system_info_json_keys: dict[str, tuple[str,int]] # JSON key → (field, tier)
+    delimiters: set[str]                          # record delimiters (HNAP/JS)
+    channel_type_values: set[str]                 # modulation type strings
+    aggregate_fields: list[tuple[str,str]]        # (source_field, agg_name)
+
+  analyze_har(har_path, fleet=None) → AnalysisResult
+  generate_config(analysis, metadata, *, fleet=None) → GenerateConfigResult
+
+Catalog provides:
+  fleet_scanner.scan_fleet(CATALOG_PATH) → FleetPatterns
+  trial_parser.trial_parse(har_path, parser_yaml) → TrialResult
+```
+
+**What fleet patterns augment:**
+
+| Phase | Baseline (Core) | Fleet augmentation (Catalog) |
+|-------|-----------------|------------------------------|
+| Table direction | Keyword matching ("downstream", "upstream") | Selector text from proven configs ("Signal Status (Codewords)" → downstream) |
+| System info labels | 17 hardcoded label→field mappings | Labels, CSS IDs, and JSON keys learned from fleet ("firmware name" → firmware_name) |
+| Aggregate fields | Hardcoded (source_field, agg_name) pairs | Additional aggregate patterns from fleet parser.yaml files |
+
+**Merge rules:** Fleet patterns augment, not override. Core's baseline
+maps apply first. Fleet adds entries only for labels/selectors that
+Core's baseline does not cover. This means a new modem gets the
+benefit of every previous modem's config without any manual registry
+maintenance.
+
+**Trial parser:** After analysis, the trial parser feeds HAR response
+bodies through Core's ``ModemParserCoordinator`` with a candidate
+``parser.yaml`` to validate that selectors find the right tables and
+field mappings extract non-empty values. This catches configuration
+errors before committing.
+
+---
+
+## Testing
+
+Core provides a reusable test harness that takes a modem directory
+and runs the full pipeline against an `HARMockServer` — a local HTTP
+server that replays HAR-captured responses with auth simulation. The
+harness is consumed by:
+
+- The MCP `run_tests` tool (during onboarding)
+- Catalog's pytest suite (during CI)
+- Developers running tests locally
+- The standalone serve command for manual HA integration testing:
+  `python -m solentlabs.cable_modem_monitor_core.test_harness <modem_dir>`
+
+### HARMockServer
+
+Builds a local HTTP server from HAR entries. Each entry becomes a
+route that replays the recorded response.
+
+```text
+HAR entry:
+  request:  { method: GET, url: "/MotoConnection.asp", headers: [...] }
+  response: { status: 200, headers: [...], content: { text: "<html>..." } }
+
+      ↓ becomes
+
+Mock route:
+  GET /MotoConnection.asp → 200, <html>...
+```
+
+**Auth-aware replay:** The server handles auth flows statefully,
+not just serves responses by URL:
+
+1. **Login endpoint** returns success response only when credentials
+   match the HAR's recorded login request body
+2. **Session cookie** is set on successful login and required on
+   subsequent requests
+3. **Data pages** return 401/redirect if no valid session, 200 with
+   recorded content if session is valid
+4. **HNAP** validates full `HNAP_AUTH` HMAC signatures on all requests
+   (login phases and data requests). The mock uses deterministic
+   challenge values, so the expected private key and login password are
+   pre-computed. This catches HMAC computation bugs (wrong key, wrong
+   message format, wrong timestamp modulo), not just header presence.
+   The mock also merges all `GetMultipleHNAPs` HAR responses into a
+   single combined response — the HNAP loader sends one batched request,
+   but HAR captures contain multiple separate calls
+
+This is necessary because the pipeline under test performs real auth
+— if the server ignores auth, we're not testing the auth config.
+
+**Stateless fallback:** For `auth: none` modems, the server simply
+maps URL paths to responses with no session tracking.
+
+**Auth coverage:** All seven auth strategies have dedicated mock handlers
+including full PBKDF2 multi-round challenge-response and SJCL AES-CCM
+crypto validation.
+
+### Golden File Comparison
+
+After the pipeline produces `ModemData`, the harness compares it
+against the golden file (`test_data/modem.expected.json`).
+
+**Comparison rules:**
+
+- Deep equality on the full `ModemData` dict
+- Downstream and upstream channel lists are order-sensitive (channel
+  order should be deterministic from the same input)
+- System info fields are compared as a flat dict
+- On failure, output a structured diff showing exactly which fields
+  diverged, with both expected and actual values
+
+**Diff format example:**
+
+```text
+FAIL: modems/motorola/mb7621
+  downstream[3].frequency:
+    expected: 507000000
+    actual:   507
+    (likely missing Hz normalization)
+
+  upstream: expected 4 channels, got 3
+    missing: channel_id=4 (frequency=37700000)
+    (likely filter excluding valid channel)
+```
+
+### Test Discovery
+
+The harness discovers test cases from the Catalog directory structure:
+
+```text
+For each modems/{mfr}/{model}/test_data/ directory:
+  For each *.har file:
+    1. Find matching *.expected.json (same stem)
+    2. Find matching modem*.yaml (see config resolution below)
+    3. Find parser.yaml (or parser.py) in parent directory
+    4. Register as a test case
+```
+
+**Config resolution** (from MODEM_DIRECTORY_SPEC.md):
+
+- `modem.har` → uses `modem.yaml`
+- `modem-{name}.har` → look for `modem-{name}.yaml`; if not found,
+  fall back to `modem.yaml`
+
+### Test Execution Flow
+
+```text
+discover test case:
+  modem.har + modem.expected.json + modem.yaml + parser.yaml
+    ↓
+build HARMockServer from modem.har
+    ↓
+load modem config (modem.yaml → auth strategy, session, actions)
+load parser config (parser.yaml → extraction mappings)
+    ↓
+run pipeline against HARMockServer:
+  1. Auth strategy authenticates (login flow)
+  2. Resource loader fetches pages declared in parser.yaml
+  3. ModemParserCoordinator extracts ModemData
+  4. parser.py post-processing (if present)
+    ↓
+compare output against modem.expected.json
+    ↓
+pass / fail with structured diff
+```
+
+### Catalog's pytest integration
+
+Catalog's test suite is thin — it just points Core's harness at its
+modem directories:
+
+```python
+# packages/cable_modem_monitor_catalog/tests/conftest.py
+from solentlabs.cable_modem_monitor_core.test_harness import discover_modem_tests
+
+# Auto-discover all modem test cases from the catalog
+pytest_plugins = []
+
+def pytest_generate_tests(metafunc):
+    """Parametrize tests from modem directory discovery."""
+    if "modem_test_case" in metafunc.fixturenames:
+        cases = discover_modem_tests(CATALOG_MODEMS_PATH)
+        metafunc.parametrize("modem_test_case", cases, ids=lambda c: c.name)
+```
+
+```python
+# packages/cable_modem_monitor_catalog/tests/test_modems.py
+from solentlabs.cable_modem_monitor_core.test_harness import run_modem_test
+
+def test_modem_har_replay(modem_test_case):
+    """Each modem's HAR replay produces expected output."""
+    result = run_modem_test(modem_test_case)
+    assert result.passed, result.diff
+```
+
+No modem-specific test code in Catalog. Adding a modem means adding
+files to its directory — the test is automatic.
+
+---
+
 
 ### Static validation (inside `generate_config`)
 
@@ -1353,147 +1508,6 @@ After all artifacts are placed in the modem directory, the LLM calls
 **Expect iteration.** Test failures are normal during onboarding.
 The LLM diagnoses the failure from the diff, fixes the config, and
 re-runs `run_tests`. This loop continues until tests pass.
-
----
-
-## Error Handling
-
-### Hard stops (do not proceed)
-
-| Condition | Message |
-|-----------|---------|
-| HAR is post-auth only (no login flow for authenticated modem) | "HAR appears to be post-auth only — first request returns 200 with data content and session cookies are present. Please recapture using incognito/private browsing." |
-| Auth mechanism cannot be determined | "Cannot determine auth mechanism from HAR. Observed: [list evidence]. Missing: [what's needed]. Please provide additional information or a more complete HAR capture." |
-| Transport ambiguous | "Cannot determine transport. HNAP markers (HNAP1 URL, SOAPAction, HNAP_AUTH header) were not found, but some data responses are ambiguous. Please confirm the modem's data transport mechanism." |
-| HAR has no data pages (only login flow) | "HAR contains login flow but no data page responses. Please recapture including navigation to the modem's status/signal pages after login." |
-
-### Warnings (proceed with flag)
-
-| Condition | Message |
-|-----------|---------|
-| `max_concurrent` unknown | "Cannot determine session concurrency limit from HAR. Defaulting to `max_concurrent: 0` (unlimited). Verify with modem documentation or contributor." |
-| No logout flow in HAR | "No logout endpoint observed in HAR. If this modem has single-session limits, a logout action will be needed." |
-| HMAC algorithm uncertain (HNAP) | "HNAP HMAC algorithm cannot be confirmed from HAR. Defaulting to `md5`. Verify with contributor." |
-| Restart not in HAR | "No restart flow observed in HAR. `actions.restart` omitted. Can be added later from modem documentation." |
-| parser.py generated | "parser.py was generated for: [reasons]. Review the post-processing logic for correctness." |
-
-### Confidence annotations
-
-The generated modem.yaml should include comments marking fields with
-low confidence:
-
-```yaml
-auth:
-  strategy: form
-  action: "/goform/login"          # from HAR: POST observed at this endpoint
-  username_field: "loginUsername"   # from HAR: form field name in POST body
-  password_field: "loginPassword"  # from HAR: form field name in POST body
-  encoding: base64                 # from HAR: password value appears base64-encoded
-
-session:
-  max_concurrent: 0                # UNVERIFIED: cannot determine from HAR alone
-```
-
----
-
-## Workflow
-
-### Full onboarding flow
-
-```text
-┌─────────────────────────────────────────────────────────┐
-│ HAR Capture (user + har-capture tool)                   │
-├─────────────────────────────────────────────────────────┤
-│ 1. User runs har-capture                                │
-│ 2. Logs into modem, navigates to each data page         │
-│ 3. Closes session                                       │
-│ 4. Uses interactive redaction tool to scrub PII         │
-│ 5. Manually reviews HAR if needed                       │
-└────────────────────────┬────────────────────────────────┘
-                         ↓ sanitized .har file
-┌─────────────────────────────────────────────────────────┐
-│ Onboarding (LLM + MCP tools)                            │
-├─────────────────────────────────────────────────────────┤
-│ 6.  LLM calls validate_har                              │
-│ 7.  LLM calls analyze_har                               │
-│     ├── hard_stops? → present to user, resolve          │
-│     └── ambiguous HTML format? → LLM reads HAR          │
-│         response bodies, picks format                   │
-│ 8.  LLM calls enrich_metadata (with analysis +          │
-│     manufacturer + model)                               │
-│     ├── reviews inferred fields                         │
-│     ├── missing fields? → LLM does web search           │
-│     │   (chipset, brands, ISPs, model aliases)          │
-│     └── warnings? → LLM resolves conflicts              │
-│ 9.  LLM calls generate_config (with analysis +          │
-│     enriched metadata) — validates before returning     │
-│     ├── validation errors? → LLM fixes, retries         │
-│     └── valid → continue                                │
-│ 10. LLM calls generate_golden_file                      │
-│     └── sanity checks channel counts with user          │
-│ 11. LLM calls write_modem_package (configs + golden     │
-│     file + HAR → catalog directory)                     │
-│ 12. LLM calls run_tests                                 │
-│     ├── failures? → LLM diagnoses, fixes config,        │
-│     │   re-runs (loop until green)                      │
-│     └── pass → continue                                 │
-│ 13. LLM commits and pushes → CI runs tests again        │
-└────────────────────────┬────────────────────────────────┘
-                         ↓ PR ready
-┌─────────────────────────────────────────────────────────┐
-│ Review and Deploy                                       │
-├─────────────────────────────────────────────────────────┤
-│ 14. Admin reviews PR changes                            │
-│ 15. PR merged → config available on next deployment     │
-└─────────────────────────────────────────────────────────┘
-```
-
-### What lives where
-
-| Responsibility | Package | Owner |
-|----------------|---------|-------|
-| HAR capture + PII redaction | har-capture | User |
-| HAR validation | Core (MCP: `validate_har`) | Tool |
-| Transport / auth / format detection | Core (MCP: `analyze_har`) | Tool |
-| Ambiguity resolution | — | LLM → User |
-| Metadata inference + gap detection | Core (MCP: `enrich_metadata`) | Tool |
-| Metadata gaps (web search) | — | LLM (web search) |
-| Config generation + validation | Core (MCP: `generate_config`) | Tool |
-| Golden file generation | Core (MCP: `generate_golden_file`) | Tool |
-| File placement | Core (MCP: `write_modem_package`) | Tool |
-| End-to-end testing | Core (harness) + MCP: `run_tests` | Tool |
-| Test failure diagnosis + fixes | — | LLM |
-| Commit + push | — | LLM → User authorization |
-| CI test execution | Core (harness) via Catalog pytest | CI |
-| PR review + merge | — | Admin |
-
-### Why MCP, not a prompt-based workflow
-
-The onboarding process is mostly deterministic: parse HAR structure,
-match patterns to config fields, validate schemas, run tests. These
-steps should be **code, not prompts** — repeatable, testable, and not
-dependent on LLM reasoning for correctness.
-
-A prompt-based approach would embed the entire decision tree in natural
-language, re-derived by the LLM every invocation. An MCP server encodes
-the deterministic parts in Python, exposing structured tools that any
-MCP-compatible AI client can orchestrate. The LLM adds value where
-judgment is needed: resolving ambiguous HTML formats, searching the
-web for metadata, diagnosing test failures, and interacting with the
-user.
-
-| | Prompt-based | MCP |
-|---|---|---|
-| Decision tree | Re-derived from spec each time | Encoded in Python, tested |
-| HAR parsing | LLM reads JSON, hopes to count correctly | Code parses deterministically |
-| Pydantic validation | LLM calls validator, interprets output | Tool returns structured errors |
-| Test execution | LLM runs pytest, parses terminal output | Tool returns structured results |
-| Repeatability | Varies by invocation | Deterministic for same input |
-| Testability | Cannot unit test a prompt | Standard Python tests |
-
-The MCP server and test harness both live in Core. Consumers include
-any MCP-compatible AI client (Claude Code, Gemini CLI, Cursor, etc.)
-and Catalog's CI (via pytest). Both are internal to this project.
 
 ---
 

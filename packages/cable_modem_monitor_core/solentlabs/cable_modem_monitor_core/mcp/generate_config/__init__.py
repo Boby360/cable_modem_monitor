@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ...validation.cross_file import validate_cross_file
+from ..analysis.types import FleetPatterns
 from .modem import build_modem_dict
 from .parser import build_parser_dict
 from .validation import (
@@ -52,6 +53,8 @@ class ValidationResult:
 def generate_config(
     analysis: dict[str, Any],
     metadata: dict[str, Any],
+    *,
+    fleet: FleetPatterns | None = None,
 ) -> GenerateConfigResult:
     """Generate modem.yaml and parser.yaml from analysis output.
 
@@ -60,6 +63,8 @@ def generate_config(
             transport, auth, session, actions, and sections.
         metadata: Caller-provided metadata — manufacturer, model,
             hardware, status, attribution, isps, etc.
+        fleet: Optional fleet patterns from the Catalog scanner.
+            When provided, augments aggregate field auto-generation.
 
     Returns:
         GenerateConfigResult with YAML strings and validation outcome.
@@ -71,7 +76,7 @@ def generate_config(
 
     # Build parser.yaml dict (None if no sections)
     sections = analysis.get("sections")
-    parser_dict = build_parser_dict(sections, metadata) if sections else None
+    parser_dict = build_parser_dict(sections, metadata, fleet=fleet) if sections else None
 
     # Validate via Pydantic
     modem_config = validate_modem(modem_dict, errors)

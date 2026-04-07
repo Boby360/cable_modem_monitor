@@ -29,8 +29,13 @@ HAR file
     ▼
 validate_har ─── structural + auth flow checks
     │
-    ▼
-analyze_har ──── transport, auth, session, actions, format, field mappings
+    │             catalog/modems/
+    │                  │
+    ▼                  ▼
+    │             scan_fleet ─── build FleetPatterns from proven configs
+    │                  │
+    ▼                  │
+analyze_har(fleet) ◄───┘ transport, auth, session, actions, format, fields
     │
     ├── hard_stops? → stop, report to user
     ├── core_gaps? → stop, report what Core needs (see below)
@@ -41,7 +46,7 @@ enrich_metadata ─ infer defaults, detect missing fields
     ├── missing fields? → LLM web search (chipset, DOCSIS version, ISPs)
     │
     ▼
-generate_config ─ modem.yaml + parser.yaml (Pydantic-validated)
+generate_config(fleet) ─ modem.yaml + parser.yaml (Pydantic-validated)
     │
     ├── validation errors? → LLM fixes, retries
     │
@@ -73,11 +78,12 @@ The pipeline separates deterministic logic (repeatable, testable Python code) fr
 
 | Step | Deterministic (MCP tool) | Judgment (LLM) |
 | ------ | -------------------------- | ----------------- |
-| HAR validation | Structural checks, auth flow detection | — |
+| HAR validation | Structural checks, auth flow detection — fail-fast gate | — |
+| Fleet scan | `scan_fleet()` builds patterns from catalog parser.yaml files | — |
 | Transport detection | HNAP marker scan, URL pattern matching | — |
 | Auth detection | Pattern matching against `auth_patterns.json` | Ambiguous cases presented to user |
 | Format detection | HNAP: deterministic. HTTP: candidate list | HTTP: LLM reads response bodies, picks format |
-| Field mapping | Column/field extraction from HAR content | — |
+| Field mapping | Column/field extraction from HAR content, fleet patterns augment direction and system_info label detection | — |
 | Metadata enrichment | Inference from analysis + defaults | Web search for missing fields (chipset, ISPs) |
 | Config generation | Pydantic validation, constraint checking | Fix validation errors and retry |
 | Golden file generation | Parse HAR through config | Sanity-check channel counts |
@@ -104,6 +110,20 @@ When the pipeline stops on a gap, the report contains enough detail (phase, cate
 
 ---
 
+## Fleet Patterns (Layer 2)
+
+The pipeline uses a three-layer detection model:
+
+1. **Core baseline** — deterministic heuristics built into `analyze_har`
+2. **Fleet patterns** — proven patterns extracted from existing catalog entries
+3. **LLM gap-fill** — judgment calls for ambiguous cases
+
+`scan_fleet()` reads all `parser.yaml` files in the catalog and builds a `FleetPatterns` instance containing selector-to-direction mappings, system_info label/ID/JSON-key mappings, delimiters, channel type values, and aggregate field patterns. This is passed to both `analyze_har(fleet=...)` and `generate_config(fleet=...)`.
+
+Fleet patterns grow automatically as new modems are onboarded — each new parser.yaml enriches detection for future modems that share similar patterns.
+
+---
+
 ## Data-Driven Extension Points
 
 Two JSON pattern files control what the pipeline recognizes. Adding support for a new login URL or action endpoint is a data change, not a code change:
@@ -122,10 +142,11 @@ Both files live in Core (`solentlabs/cable_modem_monitor_core/mcp/analysis/`). E
 | ---------- | ---------- |
 | MCP tools (validate, analyze, enrich, generate, test) | `packages/cable_modem_monitor_core/solentlabs/cable_modem_monitor_core/mcp/` |
 | Pattern files (auth, actions) | `.../mcp/analysis/auth/` and `.../mcp/analysis/actions/` |
+| Fleet scanner | `packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/fleet_scanner.py` |
 | Test harness (HAR replay, golden file comparison) | `.../test_harness/` |
 | Modem catalog entries (output) | `packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/{manufacturer}/{model}/` |
 | Authoritative spec | `packages/cable_modem_monitor_core/docs/ONBOARDING_SPEC.md` |
-| Maintainer workflow skill | `.claude/skills/modem-intake.md` |
+| Maintainer workflow | [MODEM_INTAKE_WORKFLOW.md](MODEM_INTAKE_WORKFLOW.md) |
 
 ---
 

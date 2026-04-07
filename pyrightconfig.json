@@ -7,7 +7,10 @@
     "packages/cable_modem_monitor_catalog"
   ],
   "exclude": [
-    "**/.venv",
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.*",
+    ".claude/worktrees",
     "RAW_DATA",
     "codeql",
     "cable-modem-monitor-ql"
