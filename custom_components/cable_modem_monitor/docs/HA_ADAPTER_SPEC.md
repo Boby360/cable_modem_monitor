@@ -460,6 +460,45 @@ included automatically when new diagnostics are added to the model.
 **No raw HTML capture.** Use `har-capture` for collecting raw modem
 data for parser development.
 
+### `modem_data` Summary
+
+The `modem_data` key in diagnostics output is a curated triage summary
+that cherry-picks fields from three sources. All field names use Core
+canonical names (no display-name suffixes). The full `system_info` dict
+is also included as a separate top-level key for tier-3 debugging.
+
+#### Snapshot State (enums converted to string values)
+
+| Field | Type | Source |
+|-------|------|--------|
+| `connection_status` | string | `snapshot.connection_status` |
+| `docsis_status` | string | `snapshot.docsis_status` |
+| `collector_signal` | string | `snapshot.collector_signal` |
+| `error` | string | `snapshot.error` (empty on success) |
+
+#### system\_info (Core canonical names)
+
+| Field | Type | Source |
+|-------|------|--------|
+| `downstream_channel_count` | int | Coordinator-computed or native |
+| `upstream_channel_count` | int | Coordinator-computed or native |
+| `total_corrected` | int | Aggregate or native (see PARSING_SPEC § Aggregate) |
+| `total_uncorrected` | int | Aggregate or native (see PARSING_SPEC § Aggregate) |
+| `software_version` | string | Parser-extracted |
+| `system_uptime` | string | Parser-extracted |
+
+#### health\_info (prefers health coordinator over snapshot)
+
+| Field | Type | Source |
+|-------|------|--------|
+| `health_status` | string | Health probe result (`"none"` if unavailable) |
+| `icmp_latency_ms` | float or null | ICMP round-trip (null if not supported) |
+| `http_latency_ms` | float or null | HTTP response time (null if not attempted) |
+
+**Naming rule:** Output keys match `system_info` dict keys exactly.
+HA entity display names (e.g., "Total Corrected Errors") are a separate
+concern owned by `sensor.py`, not the diagnostics layer.
+
 ---
 
 ## Services

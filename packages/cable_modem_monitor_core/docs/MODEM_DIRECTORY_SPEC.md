@@ -213,6 +213,10 @@ own auth strategy and potentially different channel data.
 }
 ```
 
+The `modem_data` section uses Core canonical field names. See
+[HA_ADAPTER_SPEC.md § modem_data Summary](../../../custom_components/cable_modem_monitor/docs/HA_ADAPTER_SPEC.md#modem_data-summary)
+for the complete field schema with types and sources.
+
 **Stripped:** `home_assistant` (environment), `setup_times` (internals),
 `recent_logs` (ephemeral), `integration_manifest` (derivable),
 `_review_before_sharing` (instruction text).

@@ -405,6 +405,11 @@ async def test_diagnostics_delegates_to_builder(mock_runtime_data):
     assert "core_diagnostics" in result
     assert "modem_data" in result
     assert result["modem_data"]["connection_status"] == "online"
+    # modem_data uses Core canonical names — no _errors suffix
+    assert result["modem_data"]["total_corrected"] == 150
+    assert result["modem_data"]["total_uncorrected"] == 3
+    assert "total_corrected_errors" not in result["modem_data"]
+    assert "total_uncorrected_errors" not in result["modem_data"]
     # Full system_info pass-through (includes tier 3 fields)
     assert "system_info" in result
     assert result["system_info"]["software_version"] == "4502.9.016"
