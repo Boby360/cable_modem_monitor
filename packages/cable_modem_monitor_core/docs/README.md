@@ -4,6 +4,9 @@
 |----------|---------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System design — packages, contracts, invariants, strategies |
 | [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md) | Design rationale — the "why" behind the architecture |
+| [AUTH_SJCL_SPEC.md](AUTH_SJCL_SPEC.md) | `form_sjcl` — SJCL AES-CCM protocol, encoding rules, firmware assumptions |
+| [AUTH_PBKDF2_SPEC.md](AUTH_PBKDF2_SPEC.md) | `form_pbkdf2` — PBKDF2 challenge-response protocol, salt handling |
+| [AUTH_CBN_SPEC.md](AUTH_CBN_SPEC.md) | `form_cbn` — CBN AES-256-CBC protocol, session token rotation |
 | [MODEM_YAML_SPEC.md](MODEM_YAML_SPEC.md) | modem.yaml schema — identity, auth, session, actions |
 | [MODEM_DIRECTORY_SPEC.md](MODEM_DIRECTORY_SPEC.md) | Catalog directory structure, file roles, assembly rules |
 | [PARSING_SPEC.md](PARSING_SPEC.md) | 6 extraction formats, parser.yaml schema, parser.py contract |

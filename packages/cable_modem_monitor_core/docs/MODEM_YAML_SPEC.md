@@ -455,6 +455,8 @@ revisions.
 ### `form_pbkdf2`
 
 Multi-round-trip challenge-response using PBKDF2 key derivation.
+See [AUTH_PBKDF2_SPEC.md](AUTH_PBKDF2_SPEC.md) for the full protocol,
+encoding rules, and firmware assumptions.
 The client requests server-provided salts, derives a key via PBKDF2,
 and submits the derived hash. Structurally closer to HNAP's
 challenge-response than to a simple form POST.
@@ -508,6 +510,9 @@ key derivation for login. Parameters are typically derived from the
 modem's login.js source code in HAR captures.
 
 ### `form_sjcl`
+
+See [AUTH_SJCL_SPEC.md](AUTH_SJCL_SPEC.md) for the full protocol,
+encoding rules, and firmware assumptions.
 
 SJCL (Stanford JavaScript Crypto Library) AES-CCM encrypted form
 auth. Some modem firmwares use the SJCL JavaScript library to
@@ -590,6 +595,9 @@ embed the SJCL library in their web interface. Constants are found
 in `base_95x.js` or similar JS files in HAR captures.
 
 ### `form_cbn`
+
+See [AUTH_CBN_SPEC.md](AUTH_CBN_SPEC.md) for the full protocol,
+encoding rules, and firmware assumptions.
 
 CBN (Compal Broadband Networks) AES-256-CBC encrypted form auth.
 Compal modem firmwares use the CryptoJS library to encrypt the

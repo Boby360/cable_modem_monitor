@@ -376,6 +376,36 @@ config fields.
   on their network, not their protocol. See `CONFIG_FLOW_SPEC.md` for the
   full setup flow.
 
+#### Crypto Library vs Firmware Wire Format
+
+Each complex auth strategy has two layers:
+
+- **Crypto library** — the algorithms and encoding rules defined by
+  the JavaScript library the firmware uses (SJCL, CryptoJS, etc.).
+  These are universal to any modem using that library.  Shared crypto
+  lives in the `protocol/` directory (e.g., `protocol/cbn.py`).
+- **Firmware wire format** — field names, payload structure, JS
+  variable names, success criteria.  These are specific to a firmware
+  family (Arris Touchstone, Technicolor REST, Compal).
+
+Currently, each complex strategy serves exactly one firmware family,
+so wire format assumptions are embedded in the strategy code.  When a
+second modem appears on the same crypto library with a different wire
+format, the refactoring point is the wire format layer — extract it
+to config or to a separate handler.  The crypto library layer should
+not change.
+
+| Strategy | Crypto library | Firmware family | Spec |
+|----------|---------------|-----------------|------|
+| `form_sjcl` | SJCL (PBKDF2 + AES-CCM) | Arris Touchstone | [AUTH_SJCL_SPEC.md](AUTH_SJCL_SPEC.md) |
+| `form_pbkdf2` | SJCL (PBKDF2 only) | Technicolor REST | [AUTH_PBKDF2_SPEC.md](AUTH_PBKDF2_SPEC.md) |
+| `form_cbn` | CryptoJS (AES-256-CBC) | Compal/CBN | [AUTH_CBN_SPEC.md](AUTH_CBN_SPEC.md) |
+
+Each dedicated spec documents the encoding boundaries, hardcoded
+firmware wire format assumptions, evidence base, and known gaps.
+The crypto library section is the implementation authority — if code
+deviates from the library's encoding rules, code is wrong.
+
 #### `url_token` Strategy — Config Reference
 
 URL token auth appends base64-encoded credentials to the URL query string
@@ -436,177 +466,23 @@ prefix (e.g., one build uses a prefix, another sends bare base64), the strategy 
 try both — first with the prefix, then without on failure. This avoids
 needing separate modem configs for what is otherwise identical behavior.
 
-#### `form_pbkdf2` Strategy — Config Reference
+#### `form_pbkdf2` Strategy
 
-PBKDF2 (Password-Based Key Derivation Function 2, RFC 8018) auth uses
-server-provided salts and client-side key derivation to authenticate without
-sending plaintext passwords over the wire. The multi-round-trip flow resembles
-HNAP's challenge-response more than a standard form POST.
+PBKDF2 challenge-response with server-provided salts and optional
+double-hashing.  See [AUTH_PBKDF2_SPEC.md](AUTH_PBKDF2_SPEC.md) for
+the full protocol, encoding rules, firmware assumptions, and evidence
+base.  Config fields are in
+[MODEM_YAML_SPEC.md](MODEM_YAML_SPEC.md#form_pbkdf2).
 
-Evidence base: modems using a shared REST API platform with PHPSESSID sessions,
-CSRF tokens, and a JavaScript login flow that performs double PBKDF2 hashing.
+#### `form_sjcl` Strategy
 
-**Auth flow:**
-
-```text
-1. POST /api/v1/session/login  { password: "seeksalthash" }
-   → Response: { salt: "<salt>", saltwebui: "<saltwebui>" }
-2. Client computes: hash1 = PBKDF2(password, salt, iterations, keylen)
-3. Client computes: hash2 = PBKDF2(hash1, saltwebui, iterations, keylen)
-4. POST /api/v1/session/login  { password: "<hash2>" }
-   → Response: sets PHPSESSID cookie (auth.cookie_name), returns CSRF token
-5. Subsequent GETs use PHPSESSID cookie only (no CSRF on GETs)
-6. Subsequent POSTs (e.g., logout) include PHPSESSID cookie + X-CSRF-TOKEN header (auth.csrf_header)
-   If csrf_init_endpoint is set, fetch a fresh token before each POST
-```
-
-**Auth config fields** (login mechanics only):
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `login_endpoint` | string | required | URL that accepts both salt request and login POST (e.g., `/api/v1/session/login`) |
-| `salt_trigger` | string | `"seeksalthash"` | Password value that triggers the server to return salts instead of authenticating. Observed in modem login.js source code. |
-| `pbkdf2_iterations` | int | required | PBKDF2 iteration count (e.g., 1000). From login.js `doPbkdf2NotCoded()` parameters. |
-| `pbkdf2_key_length` | int | required | Derived key length in bits (e.g., 128). From login.js parameters. |
-| `double_hash` | bool | `true` | If true, hash twice: first with `salt`, then with `saltwebui`. All known modems with this auth pattern use double hashing. |
-| `csrf_init_endpoint` | string | `""` | Endpoint to fetch a fresh CSRF token (e.g., `/api/v1/session/init_page`). Called before each POST that requires CSRF (login step 4, logout). If empty, CSRF token is extracted from the login response and reused for all POSTs. |
-
-Session cookie, logout URL, and CSRF header for subsequent requests
-are declared in the `session` section — see `MODEM_YAML_SPEC.md` Session.
-
-**Example:**
-
-```yaml
-auth:
-  strategy: form_pbkdf2
-  login_endpoint: "/api/v1/session/login"
-  salt_trigger: "seeksalthash"
-  pbkdf2_iterations: 1000
-  pbkdf2_key_length: 128
-  double_hash: true
-  csrf_init_endpoint: "/api/v1/session/init_page"
-
-session:
-  cookie_name: "PHPSESSID"
-  max_concurrent: 1
-  headers:
-    X-Requested-With: "XMLHttpRequest"
-
-actions:
-  logout:
-    type: http
-    method: POST
-    endpoint: "/api/v1/session/logout"
-```
-
-**Evidence gaps:** The full auth flow is derived from login.js source code
-captured in HAR entries, not from observing all HTTP transactions. Only the
-first POST (salt request) was captured in the HAR captures for these modems.
-The second POST (hashed password) was executed by JavaScript but not recorded
-in the HAR entries. The PBKDF2 function parameters are partially redacted in
-one HAR (`***REDACTED***`) but visible in another's login.js
-(SJCL PBKDF2, 1000 iterations, 128-bit key). Config values should be verified
-against real login traffic when these modems are implemented.
-
-**Salt fallback:** These modems' login.js contain a
-`salt == "none"` branch that skips PBKDF2 and sends the plaintext password.
-This triggers when no password has been configured (first-time setup,
-factory reset, ISP default credentials). The `form_pbkdf2` strategy handles
-this inline: if the salt response is `"none"`, POST the plaintext password
-instead of performing key derivation. This is a branch within the strategy,
-not a fallback to a different strategy.
-
-#### `form_sjcl` Strategy — Config Reference
-
-SJCL (Stanford JavaScript Crypto Library) AES-CCM auth encrypts credentials
-client-side before POSTing, and decrypts the server's response to extract a
-CSRF nonce. The key is derived via PBKDF2 from the password and a
-per-session salt embedded in the login page's JavaScript.
-
-Evidence base: gateway firmwares that use the SJCL library for client-side
-encryption. The login page embeds `myIv`, `mySalt`, and `currentSessionId`
-as JavaScript variables; the login script uses these to AES-CCM encrypt the
-credentials before submission.
-
-**Auth flow:**
-
-```text
-1. GET login page (login_page)
-   → Parse JS variables: myIv (hex), mySalt (hex), currentSessionId
-
-2. Derive AES key:
-   PBKDF2-HMAC-SHA256(password.utf8, hex_decode(mySalt), iterations, key_len)
-   Note: SJCL's sjclPbkdf2() hex-decodes the salt via
-   sjcl.codec.hex.toBits(salt) before calling sjcl.misc.pbkdf2().
-   The IV is also hex-decoded: iv_bytes = hex_decode(myIv).
-
-3. Encrypt credentials:
-   plaintext = JSON.serialize({"Password": "<pw>", "Nonce": "<sessionId>"})
-   ciphertext = AES-CCM(key, iv_bytes, plaintext.utf8, aad=encrypt_aad.utf8)
-
-4. POST login (login_endpoint):
-   {"EncryptData": hex(ciphertext), "Name": "<user>", "AuthData": "<encrypt_aad>"}
-   → Response: {"p_status": "AdminMatch"|"Match", "encryptData": "<hex>"}
-   → Sets session cookie (auth.cookie_name)
-
-5. Decrypt response:
-   AES-CCM decrypt hex_decode(encryptData) with aad=decrypt_aad.utf8 → CSRF nonce
-   → Set csrf_header on session for subsequent requests
-
-6. POST session validation (session_validation_endpoint, optional):
-   Empty JSON POST with csrf_header → finalizes session
-```
-
-**Auth config fields** (login mechanics only):
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `login_page` | string | `"/"` | Page URL containing the JS variables (`myIv`, `mySalt`, `currentSessionId`) |
-| `login_endpoint` | string | required | URL that accepts the encrypted login POST |
-| `session_validation_endpoint` | string | `""` | Optional endpoint to finalize session after login. If set, a POST with the CSRF header is sent after successful decryption. |
-| `pbkdf2_iterations` | int | required | PBKDF2 iteration count (from login.js) |
-| `pbkdf2_key_length` | int | required | Derived key length in bits (from login.js) |
-| `ccm_tag_length` | int | `16` | AES-CCM authentication tag length in bytes |
-| `encrypt_aad` | string | `"loginPassword"` | AAD (Additional Authenticated Data) for encrypting the login payload |
-| `decrypt_aad` | string | `"nonce"` | AAD for decrypting the server response to extract the CSRF nonce |
-| `csrf_header` | string | `""` | Header name for the CSRF nonce on subsequent requests. If empty, no CSRF nonce is extracted. |
-
-Session cookie and logout are declared in the `session` and `actions`
-sections — see `MODEM_YAML_SPEC.md`.
-
-**Example:**
-
-```yaml
-auth:
-  strategy: form_sjcl
-  login_page: "/"
-  login_endpoint: "/api/login"
-  session_validation_endpoint: "/api/session"
-  pbkdf2_iterations: 1000
-  pbkdf2_key_length: 128
-  ccm_tag_length: 16
-  encrypt_aad: "loginPassword"
-  decrypt_aad: "nonce"
-  csrf_header: "csrfNonce"
-
-session:
-  cookie_name: "sid"
-  max_concurrent: 1
-  headers:
-    X-Requested-With: "XMLHttpRequest"
-
-actions:
-  logout:
-    type: http
-    method: POST
-    endpoint: "/api/session"
-```
-
-**Dependency:** `form_sjcl` requires the `cryptography` package for
-AES-CCM primitives. Install Core with the `[sjcl]` extra:
-`pip install solentlabs-cable-modem-monitor-core[sjcl]`. If the package is
-missing at runtime, the strategy returns `AuthResult.FAILURE` with an
-install instruction — no import error crash.
+SJCL AES-CCM encrypted auth with bidirectional encryption (encrypt
+credentials, decrypt response to extract CSRF nonce).  Requires the
+`cryptography` package (`[sjcl]` extra).  See
+[AUTH_SJCL_SPEC.md](AUTH_SJCL_SPEC.md) for the full protocol,
+encoding rules, firmware assumptions, and evidence base.  Config
+fields are in
+[MODEM_YAML_SPEC.md](MODEM_YAML_SPEC.md#form_sjcl).
 
 ### Session Management
 
