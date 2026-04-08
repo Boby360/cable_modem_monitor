@@ -491,6 +491,35 @@ a firmware issue or temporary overload.
 
 ---
 
+### UC-23: Form auth — hidden field discovery from login page
+
+**Preconditions:** Modem uses `strategy: form` with `login_page`
+configured. The login page contains `<input type="hidden">` fields
+(e.g., CSRF token) that must be included in the login POST.
+
+| Step | Action | State change | Observable |
+|------|--------|-------------|------------|
+| 1 | Consumer calls `get_modem_data()` | | |
+| 2 | Collector: no active session, starts auth | | |
+| 3 | FormAuthManager: GET `login_page` | Session cookies established | |
+| 4 | FormAuthManager: reads hidden fields from login form HTML | | DEBUG log: "Discovered N hidden field(s)" |
+| 5 | FormAuthManager: builds POST data — discovered fields (base) ← `hidden_fields` (override) ← credentials | | |
+| 6 | FormAuthManager: POST to `action` endpoint with merged form data | | |
+| 7 | Success evaluation (redirect or status check) | Auth succeeded | |
+
+**Assertions:**
+
+- Hidden fields from the login page are included in the POST body
+- `hidden_fields` from modem.yaml override discovered values (same key)
+- Credentials (`username_field`, `password_field`) override both
+- If login page returns empty body or error: discovered fields = `{}`,
+  auth proceeds with `hidden_fields` and credentials only (graceful
+  degradation)
+- Dynamic fields (e.g., CSRF tokens) get fresh values on every auth
+  attempt — no stale values from build-time config
+
+---
+
 ## Connectivity Failures
 
 ### UC-30: Connection refused — modem offline

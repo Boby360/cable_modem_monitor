@@ -50,9 +50,13 @@ def _strip_js_comments(text: str) -> str:
 
 @functools.cache
 def _get_func_body_re(func_name: str) -> re.Pattern[str]:
-    """Return a compiled regex for extracting a named function body."""
+    """Return a compiled regex for extracting a named function body.
+
+    Handles both ``\\n`` and ``\\r\\n`` line endings, and closing braces
+    at any indentation level (some firmware indents the entire function).
+    """
     return re.compile(
-        rf"function\s+{re.escape(func_name)}\s*\([^)]*\)\s*\{{(.*?)\n\}}",
+        rf"function\s+{re.escape(func_name)}\s*\([^)]*\)\s*\{{(.*?)\n\s*\}}",
         re.DOTALL,
     )
 
@@ -205,6 +209,9 @@ def _extract_tag_value_list(soup: BeautifulSoup, func_name: str) -> str | None:
         text = script.string
         if not text or func_name not in text:
             continue
+
+        # Normalize CRLF → LF (some firmware serves \r\n line endings)
+        text = text.replace("\r\n", "\n")
 
         func_match = func_re.search(text)
         if not func_match:

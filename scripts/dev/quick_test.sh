@@ -6,13 +6,15 @@
 #   - You want minimal output for rapid iteration
 #   - You're in active development mode
 #
+# Worktree-aware: resolves .venv from the main repo if needed.
 # For first-time setup or full testing, use run_tests_local.sh instead
 
 set -e
 
-# Activate venv if it exists
-if [ -d ".venv" ]; then
-    source .venv/bin/activate
+source "$(dirname "${BASH_SOURCE[0]}")/resolve-venv.sh"
+
+if [[ -n "$VENV_ROOT" && -f "$VENV_ROOT/bin/activate" ]]; then
+    source "$VENV_ROOT/bin/activate"
 fi
 
 # Run HA integration tests

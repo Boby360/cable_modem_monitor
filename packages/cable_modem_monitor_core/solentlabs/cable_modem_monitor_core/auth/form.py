@@ -10,9 +10,12 @@ import logging
 from urllib.parse import urlparse
 
 import requests
+from bs4 import BeautifulSoup, Tag
 
 from ..models.modem_config.auth import FormAuth
 from .base import AuthResult, BaseAuthManager
+
+_logger = logging.getLogger(__name__)
 
 
 class FormAuthManager(BaseAuthManager):
@@ -61,9 +64,10 @@ class FormAuthManager(BaseAuthManager):
         config = self._config
 
         # Step 1: Pre-fetch login page if configured (for cookies/nonces)
+        discovered_fields: dict[str, str] = {}
         if config.login_page:
             try:
-                session.get(
+                prefetch_response = session.get(
                     f"{base_url}{config.login_page}",
                     timeout=timeout,
                 )
@@ -75,12 +79,21 @@ class FormAuthManager(BaseAuthManager):
                     error=f"Login page pre-fetch failed: {e}",
                 )
 
-        # Step 2: Build form data from config
+            # Read hidden fields from the login form
+            discovered_fields = _discover_hidden_fields(
+                prefetch_response.text,
+                config.form_selector,
+            )
+
+        # Step 2: Build form data
+        # Merge order: discovered fields <- hidden_fields <- credentials
         encoded_password = _encode_password(password, config.encoding)
-        form_data: dict[str, str] = {config.username_field: username}
+        form_data: dict[str, str] = {}
+        form_data.update(discovered_fields)
+        form_data.update(config.hidden_fields)
+        form_data[config.username_field] = username
         for field_name in config.password_field:
             form_data[field_name] = encoded_password
-        form_data.update(config.hidden_fields)
 
         # Step 3: POST to login endpoint with Referer header.
         # Some modem firmware rejects login POSTs without a matching
@@ -148,3 +161,52 @@ def _check_success(config: FormAuth, response: requests.Response) -> str:
         return f"Login success indicator '{config.success.indicator}' not found in response body"
 
     return ""
+
+
+def _discover_hidden_fields(html: str, form_selector: str) -> dict[str, str]:
+    """Read ``<input type="hidden">`` fields from the login form.
+
+    Part of the auth handshake: discovers hidden fields (CSRF tokens,
+    mode flags, etc.) that the form expects to be submitted alongside
+    credentials. Only collects ``type="hidden"`` inputs — not text,
+    password, or other input types.
+
+    Args:
+        html: Raw HTML string from the login page pre-fetch.
+        form_selector: CSS selector to identify the login form.
+            If empty, uses the first ``<form>`` found, or falls back
+            to page-level hidden inputs.
+
+    Returns:
+        Dict of field name to value. Empty dict on any failure.
+    """
+    if not html:
+        return {}
+
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:
+        _logger.debug("Failed to parse login page HTML", exc_info=True)
+        return {}
+
+    scope: Tag | BeautifulSoup = soup
+    if form_selector:
+        match = soup.select_one(form_selector)
+        if match is not None:
+            scope = match
+    if scope is soup:
+        form = soup.find("form")
+        if form is not None:
+            scope = form
+
+    fields: dict[str, str] = {}
+    for inp in scope.find_all("input", attrs={"type": "hidden"}):
+        name = inp.get("name")
+        if isinstance(name, str) and name:
+            value = inp.get("value", "")
+            fields[name] = value if isinstance(value, str) else ""
+
+    if fields:
+        _logger.debug("Discovered %d hidden field(s) from login form", len(fields))
+
+    return fields

@@ -10,6 +10,10 @@ auth:
   username_field: loginUsername
   password_field: loginPassword
   cookie_name: "SessionID"
+  hidden_fields:
+    login: "1"
+  success:
+    redirect: "/GenieIndex.asp"
 
 hardware:
   docsis_version: "3.1"
@@ -28,10 +32,13 @@ attribution:
 isps:
   - Comcast
 notes: |
-  DOCSIS 3.1 cable modem. Same tagValueList format as CM1200/CM2000.
-  32 SC-QAM + OFDM downstream, ATDMA + OFDMA upstream.
-  Login form includes webToken CSRF field. md5.js loaded but
-  password sent plaintext in captured HAR.
+  DOCSIS 3.1 cable modem. HTML table channel data on /DocsisStatus.asp
+  (not tagValueList like CM1200/CM2000 — JS tagValueLists contain
+  channel counts only). System info (InitTagValue) uses the same JS
+  format as CM1200. 32 SC-QAM + OFDM downstream, ATDMA + OFDMA
+  upstream. Login form includes webToken CSRF field (dynamic, discovered
+  at runtime via login_page). md5.js loaded but password sent plaintext
+  in captured HAR.
 
 references:
   issues:

@@ -10,6 +10,7 @@ import requests
 from solentlabs.cable_modem_monitor_core.auth.form import (
     FormAuthManager,
     _check_success,
+    _discover_hidden_fields,
     _encode_password,
 )
 from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
@@ -410,3 +411,157 @@ def test_check_success_fallback_boundary(
     else:
         assert error != "", f"Status {status} should be rejected"
         assert str(status) in error
+
+
+# ---------------------------------------------------------------------------
+# Hidden field discovery — unit tests
+# ---------------------------------------------------------------------------
+
+# Named HTML constants (no inline data blobs in test methods — rule 18)
+_LOGIN_FORM_WITH_CSRF = (
+    "<html><body>"
+    "<form action='/goform/login' method='POST'>"
+    "<input type='text' name='username' value=''>"
+    "<input type='password' name='password' value=''>"
+    "<input type='hidden' name='webToken' value='tok-9876'>"
+    "<input type='hidden' name='mode' value='login'>"
+    "</form>"
+    "</body></html>"
+)
+
+_TWO_FORMS_PAGE = (
+    "<html><body>"
+    "<form id='search'><input type='hidden' name='q' value='x'></form>"
+    "<form id='login'><input type='hidden' name='tok' value='abc'></form>"
+    "</body></html>"
+)
+
+_NO_FORMS_PAGE = "<html><body><p>No forms here</p></body></html>"
+
+
+DISCOVER_HIDDEN_FIELDS_CASES = [
+    pytest.param(
+        _LOGIN_FORM_WITH_CSRF,
+        "",
+        {"webToken": "tok-9876", "mode": "login"},
+        id="first_form_fallback",
+    ),
+    pytest.param(
+        _LOGIN_FORM_WITH_CSRF,
+        "form[action='/goform/login']",
+        {"webToken": "tok-9876", "mode": "login"},
+        id="css_selector_targets_form",
+    ),
+    pytest.param(
+        _TWO_FORMS_PAGE,
+        "#login",
+        {"tok": "abc"},
+        id="selector_picks_correct_form",
+    ),
+    pytest.param("", "", {}, id="empty_html"),
+    pytest.param(_NO_FORMS_PAGE, "", {}, id="no_hidden_inputs"),
+]
+
+
+@pytest.mark.parametrize("html,selector,expected", DISCOVER_HIDDEN_FIELDS_CASES)
+def test_discover_hidden_fields(
+    html: str,
+    selector: str,
+    expected: dict[str, str],
+) -> None:
+    """_discover_hidden_fields reads only type=hidden inputs from the form."""
+    assert _discover_hidden_fields(html, selector) == expected
+
+
+# ---------------------------------------------------------------------------
+# Hidden field discovery — merge behavior (integration)
+# ---------------------------------------------------------------------------
+
+_DISCOVER_PATCH = "solentlabs.cable_modem_monitor_core.auth.form._discover_hidden_fields"
+
+MERGE_BEHAVIOR_CASES = [
+    pytest.param(
+        {},
+        {"csrf_token": "abc123", "mode": "login"},
+        {"csrf_token": "abc123", "mode": "login"},
+        id="discovered_fields_included",
+    ),
+    pytest.param(
+        {"mode": "override"},
+        {"csrf_token": "abc123", "mode": "login"},
+        {"csrf_token": "abc123", "mode": "override"},
+        id="static_overrides_discovered",
+    ),
+    pytest.param(
+        {},
+        {},
+        {},
+        id="empty_discovery_no_effect",
+    ),
+]
+
+
+@pytest.mark.parametrize("hidden_fields,discovered,expected_subset", MERGE_BEHAVIOR_CASES)
+def test_hidden_field_merge_order(
+    hidden_fields: dict[str, str],
+    discovered: dict[str, str],
+    expected_subset: dict[str, str],
+    session: requests.Session,
+) -> None:
+    """Merge order: discovered (base) <- hidden_fields (override) <- credentials."""
+    entries, modem_config = load_auth_fixture(
+        "har_form_login_with_hidden_fields.json",
+    )
+
+    with HARMockServer(entries, modem_config=modem_config) as server:
+        config = FormAuth(
+            strategy="form",
+            action="/goform/login",
+            login_page="/login.html",
+            hidden_fields=hidden_fields,
+        )
+        manager = FormAuthManager(config)
+        manager.configure_session(session, {})
+
+        with (
+            patch(_DISCOVER_PATCH, return_value=discovered),
+            patch.object(session, "request", wraps=session.request) as mock_req,
+        ):
+            result = manager.authenticate(
+                session,
+                server.base_url,
+                "admin",
+                "password",
+            )
+
+        assert result.success is True
+        post_data = mock_req.call_args.kwargs.get("data", {})
+        for key, value in expected_subset.items():
+            assert post_data.get(key) == value, f"Expected {key}={value!r}, got {post_data.get(key)!r}"
+        # Credentials always present regardless of discovered fields
+        assert post_data.get("username") == "admin"
+        assert post_data.get("password") == "password"
+
+
+def test_no_login_page_skips_discovery(session: requests.Session) -> None:
+    """Without login_page, no pre-fetch or field discovery occurs."""
+    entries, modem_config = load_auth_fixture("har_form_login.json")
+
+    with HARMockServer(entries, modem_config=modem_config) as server:
+        config = FormAuth(
+            strategy="form",
+            action="/goform/login",
+        )
+        manager = FormAuthManager(config)
+        manager.configure_session(session, {})
+
+        with patch(_DISCOVER_PATCH) as mock_discover:
+            result = manager.authenticate(
+                session,
+                server.base_url,
+                "admin",
+                "password",
+            )
+
+        assert result.success is True
+        mock_discover.assert_not_called()

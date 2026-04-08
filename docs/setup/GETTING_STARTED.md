@@ -556,7 +556,7 @@ All development happens inside WSL2. See [WSL2 Reference](WSL2_SETUP.md).
 | Open in VS Code | `code .` |
 | Reopen in container | `F1` -> "Dev Containers: Reopen in Container" |
 | **Development** | |
-| Activate venv (local) | `source .venv/bin/activate` |
+| Activate venv | `source scripts/dev/activate_venv.sh` (worktree-aware) |
 | Run quick tests | `make test-quick` |
 | Run all tests | `make test` |
 | Format code | `make format` |
@@ -569,6 +569,38 @@ All development happens inside WSL2. See [WSL2 Reference](WSL2_SETUP.md).
 | View all tasks | `Ctrl+Shift+P` -> "Tasks: Run Task" |
 | Switch to container | `F1` -> "Dev Containers: Reopen in Container" |
 | Switch to local | `F1` -> "Dev Containers: Reopen Folder Locally" |
+
+---
+
+## Git Worktrees
+
+Git worktrees let you work on multiple branches simultaneously without
+stashing or switching. The project's `.venv` lives in the main repo
+root — worktrees don't get their own copy.
+
+### How venv resolution works
+
+All dev scripts use `scripts/dev/resolve-venv.sh` to find the venv:
+
+1. Check for `.venv` in the current directory (normal clone)
+2. If not found, resolve the main worktree via
+   `git rev-parse --git-common-dir` and use its `.venv`
+
+This is transparent — `run-python.sh`, `run-pyright.sh`,
+`activate_venv.sh`, `quick_test.sh`, and pre-commit hooks all
+resolve the venv automatically.
+
+### Creating a worktree
+
+```bash
+git worktree add .claude/worktrees/my-feature feature/v3.14.0
+cd .claude/worktrees/my-feature
+```
+
+Pre-commit hooks, test runners, VS Code, and Pylance all work
+immediately — no manual setup needed. On first use, a `.venv`
+symlink is created automatically (gitignored) pointing to the main
+repo's venv.
 
 ---
 

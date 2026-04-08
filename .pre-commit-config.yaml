@@ -37,13 +37,14 @@ repos:
 
   # Type checking with Pyright (catches errors Pylance shows in VS Code)
   # Uses the project venv — matches pyrightconfig.json at repo root.
+  # Worktree-aware: resolves pyright from main worktree's .venv.
   # Scoped to the same paths as mypy (Core/Catalog source + tests).
   - repo: local
     hooks:
       - id: pyright
         name: pyright
-        entry: .venv/bin/pyright
-        language: system
+        entry: scripts/dev/run-pyright.sh
+        language: script
         files: ^(packages/|custom_components/|tests/).*\.py$
         pass_filenames: false
 

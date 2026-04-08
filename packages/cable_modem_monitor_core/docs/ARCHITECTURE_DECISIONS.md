@@ -388,6 +388,14 @@ Add a dataclass, a `BaseAuthStrategy` subclass, and a factory
 registration in Core. Add the strategy string to the valid auth list.
 Update validators. No existing strategy code is touched.
 
+**If the strategy pre-fetches a login page, use the response.** Four
+of nine strategies pre-fetch a page as part of the auth handshake
+(`form`, `form_sjcl`, `form_cbn`, `url_token`). Each extracts
+session-specific state from the response — hidden fields, crypto
+parameters, cookies, or tokens. The pre-fetch establishes session
+cookies as a side effect, but its primary purpose is reading the
+data the handshake needs. Discarding the response body is a bug.
+
 ### How to add a transport
 
 Add a new loader (new value type), new `BaseParser` implementation(s)

@@ -351,11 +351,24 @@ config fields.
   existing config surface — none of these warrant separate strategies
 - Auth strategy **selection** is purely config-driven — no runtime inspection
   of login pages to determine which strategy to use.
-  Auth **execution** routinely interacts with login
-  pages: `form` fetches the page to extract hidden fields, `form_nonce` extracts
-  a server-generated nonce, `form_pbkdf2` fetches salts before computing the
-  password hash. The distinction: config decides *what* to do, runtime
+  Auth **execution** routinely interacts with login pages to complete the
+  handshake. The distinction: config decides *what* to do, runtime
   interaction is *how* the configured strategy executes.
+- **Login page pre-fetch pattern:** Four strategies pre-fetch a login
+  page and extract session-specific state from the response. Each
+  strategy extracts different data, but the principle is shared: if
+  the strategy fetches a page, it reads what it needs from the response.
+
+  | Strategy | Extracts from login page |
+  |----------|--------------------------|
+  | `form` | `<input type="hidden">` fields (CSRF tokens, mode flags) |
+  | `form_sjcl` | JS crypto variables (`myIv`, `mySalt`, `currentSessionId`) |
+  | `form_cbn` | Session token cookie |
+  | `url_token` | Auth token from response body |
+
+  For `form`, discovered hidden fields are merged with `hidden_fields`
+  (static overrides from YAML) and credentials. See MODEM_YAML_SPEC.md
+  for the merge order.
 - Multi-variant modems use separate `modem-{variant}.yaml` files — one per
   firmware variant, each with a single `auth` block. The config flow presents
   variants as user choices during setup. Protocol (HTTP vs HTTPS) is detected

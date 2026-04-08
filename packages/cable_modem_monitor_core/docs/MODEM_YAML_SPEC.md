@@ -239,17 +239,20 @@ auth:
 | `password_field` | string or list | `"password"` | Form field name(s) for password. All fields receive the same encoded password. Use a list when the modem POSTs the password to multiple form fields. |
 | `encoding` | enum | `plain` | `plain` or `base64` — how the password is encoded before POST |
 | `cookie_name` | string | `""` | Session cookie produced by login. Auth owns the cookie it produces — see ARCHITECTURE_DECISIONS.md. |
-| `hidden_fields` | map | `{}` | Additional form fields to include in the POST (e.g., hidden inputs, CSRF tokens, static values). The MCP intake pipeline extracts these from the login page HTML at build time. |
-| `login_page` | string | `""` | Page to fetch before login (for cookies/nonces). If empty, POST directly without pre-fetch. |
-| `form_selector` | string | `""` | CSS selector to find the login form. Used by the MCP intake pipeline at build time to extract hidden fields from the login page HTML. Not used at runtime. |
+| `hidden_fields` | map | `{}` | Static overrides or supplements for form hidden fields. Values here take precedence over fields discovered from the `login_page` form. Use when the form's default value isn't what the modem expects, or to add fields not present in the HTML. |
+| `login_page` | string | `""` | Page to fetch before login. Establishes session cookies and reads `<input type="hidden">` fields from the login form. Discovered hidden fields are included in the POST automatically. If empty, POST directly without pre-fetch. |
+| `form_selector` | string | `""` | CSS selector to identify the login form on `login_page` for hidden-field discovery. If empty, uses the first `<form>` found. Also used by MCP intake at build time. |
 | `success.redirect` | string | `""` | Expected redirect URL after successful login |
 | `success.indicator` | string | `""` | String to match in response body to confirm success |
 
-**Form POST body:** The POST body is built entirely from config. The
-auth manager sends `username_field`, all `password_field` entries (each
-with encoding applied), and all `hidden_fields`. No runtime HTML
-parsing — the YAML is the complete, intentional declaration of what
-gets POSTed.
+**Form POST body:** When `login_page` is set, the auth manager
+pre-fetches the page and reads `<input type="hidden">` fields from
+the login form. Merge order: discovered fields (base) ← `hidden_fields`
+(override) ← credentials (override). This automatically supports
+modems with dynamic CSRF tokens (e.g., server-generated `webToken`).
+When `login_page` is empty, the POST body is built entirely from
+config: `username_field`, `password_field` entries, and
+`hidden_fields`.
 
 **Success detection:** If `success` is provided, checks `redirect`
 (path substring match) and/or `indicator` (body substring match).
