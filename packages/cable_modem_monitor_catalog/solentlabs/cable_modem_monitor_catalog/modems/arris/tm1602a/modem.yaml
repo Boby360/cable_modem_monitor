@@ -13,9 +13,7 @@ hardware:
 status: awaiting_verification
 
 sources:
-  auth_config:
-    "[#112 TM1602A HAR capture](https://github.com/solentlabs/cable_modem_monitor/issues/112)
-    — no login required"
+  auth_config: "HAR capture (#112) — no login required"
   chipset: "[TechInfoDepot](https://techinfodepot.shoutwiki.com/wiki/Arris_TM1602A)"
 
 attribution:
@@ -30,7 +28,7 @@ notes: |
   No authentication required — CGI endpoints are publicly accessible.
   Same CGI structure as CM820B: /cgi-bin/status_cgi (channels + uptime)
   and /cgi-bin/vers_cgi (firmware/hardware version). Version info
-  requires parser.py post-processor to parse the "System:" blob.
+  parsed from the "System:" blob via parser.yaml label/pattern rules.
 
 references:
   issues:

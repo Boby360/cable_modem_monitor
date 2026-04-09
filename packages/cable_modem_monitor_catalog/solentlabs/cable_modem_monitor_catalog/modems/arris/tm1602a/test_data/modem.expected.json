@@ -242,6 +242,7 @@
     }
   ],
   "system_info": {
+    "docsis_status": "Operational",
     "downstream_channel_count": 24,
     "firmware_build_time": "Wed Nov  8 07:31:40 EST 2023",
     "firmware_name": "TS0901303U11_110823_1602.TM_PC20_TW",
@@ -258,6 +259,7 @@
       "channel_id": 9,
       "channel_type": "atdma",
       "frequency": 15800000,
+      "modulation": "64QAM",
       "power": 42.75,
       "symbol_rate": 5120
     },
@@ -265,6 +267,7 @@
       "channel_id": 10,
       "channel_type": "atdma",
       "frequency": 22200000,
+      "modulation": "64QAM",
       "power": 41.0,
       "symbol_rate": 5120
     }
