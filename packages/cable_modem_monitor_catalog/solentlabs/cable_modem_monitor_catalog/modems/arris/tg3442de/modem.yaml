@@ -23,6 +23,7 @@ auth:
 session:
   headers:
     X-Requested-With: "XMLHttpRequest"
+    csrfNonce: "undefined"
 
   max_concurrent: 1
 actions:

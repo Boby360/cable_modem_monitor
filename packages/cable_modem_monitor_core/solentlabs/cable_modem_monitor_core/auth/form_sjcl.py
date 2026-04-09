@@ -126,10 +126,7 @@ class FormSjclAuthManager(BaseAuthManager):
         )
 
         # Step 3: Encrypt credentials
-        plaintext = json.dumps(
-            {"Password": password, "Nonce": session_id},
-            separators=(",", ":"),
-        )
+        plaintext = json.dumps({"Password": password, "Nonce": session_id})
 
         cipher = aesccm_cls(key, tag_length=config.ccm_tag_length)
         encrypted = cipher.encrypt(

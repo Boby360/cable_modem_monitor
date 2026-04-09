@@ -50,6 +50,8 @@ Step-by-step with explicit encoding at every boundary:
 
 3. Encrypt credentials:
    plaintext = JSON.serialize({"Password": "<pw>", "Nonce": "<sessionId>"})
+   Note: browser builds this via string concatenation with spaces after
+   ":" and ",".  Python json.dumps() default (no separators arg) matches.
    ciphertext = AES-CCM(key, hex_decode(myIv), plaintext.utf8, aad=encrypt_aad.utf8)
 
 4. POST login (login_endpoint):
@@ -125,15 +127,16 @@ or requests for these models.
 
 ## Known Gaps
 
-- **Unconfirmed**: The TG3442DE has never successfully authenticated
-  with our code. Alpha.13 contains the salt encoding fix. Samuel's
-  confirmation will be the first real-world validation.
 - **Single modem**: No wire format variation has been observed. All
   firmware assumptions are derived from one modem.
 - **`encryptflag` not checked**: The login page has an `encryptflag` JS
   variable (`'true'` in all captures). The code always encrypts --- if a
   firmware version has `encryptflag = 'false'`, the strategy would fail.
-- **Session cleanup not replicated**: The browser's JS calls
-  `logout.php` via `doSessionClean()` before login to clear stale
-  sessions. Our code does not. This may cause issues on modems with
-  aggressive single-session enforcement.
+- **Pre-auth `csrfNonce` header**: The browser's `$.ajaxSetup` sends
+  `csrfNonce: "undefined"` on every AJAX request before login. Declared
+  as a static header in `session.headers` in modem.yaml. The auth
+  strategy overwrites it with the decrypted nonce after login.
+- **Session cleanup not tested**: The browser calls `logout.php` via
+  `doSessionClean()` before login. The `csrfNonce` header fix resolves
+  the 471 error, but session cleanup may still matter for stale-session
+  rejection on modems with single-session enforcement.

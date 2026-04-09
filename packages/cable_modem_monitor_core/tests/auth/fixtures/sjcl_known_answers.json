@@ -12,8 +12,8 @@
       "expected_key_hex": "8cc36bba89547bf15fed0b23de009f28",
       "encrypt_aad": "loginPassword",
       "decrypt_aad": "nonce",
-      "plaintext": "{\"Password\":\"pw\",\"Nonce\":\"mock_session_123\"}",
-      "expected_ciphertext_hex": "2083be52a7186717120030d4e330a3beff2246213affb8bb524cf04667fdb9220c15a8ee7f4af2ab0ee2e419a3bbd5954004284cf7d368ff8a4071c6",
+      "plaintext": "{\"Password\": \"pw\", \"Nonce\": \"mock_session_123\"}",
+      "expected_ciphertext_hex": "2083be52a7186717120030d4e162a4ebf12c286c1af3b3fa0d4ca70926fb89320239a8e26357c4f5528ef756acfb3b809413bde82385653f9e4d1b22378d2e",
       "nonce_plaintext": "mock_csrf_nonce",
       "expected_nonce_ciphertext_hex": "36ce8d588b08630a063b7c81af23b1922ec744a8515b62a0232c6c9cf91f2e"
     }
