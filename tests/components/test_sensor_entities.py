@@ -17,7 +17,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from homeassistant.components.sensor import SensorStateClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from solentlabs.cable_modem_monitor_core.orchestration.models import (
     HealthInfo,
     ModemSnapshot,
@@ -556,11 +556,45 @@ def test_humanize_field_name(field, expected, desc):
 # SystemInfoFieldSensor — Tier 3 dynamic pass-through
 # -----------------------------------------------------------------------
 
+# ┌──────────────────────────┬───────────────────────┬─────────────────┬──────────┬──────────────┬──────────────┐
+# │ id                       │ field                 │ value           │ expected │ unit         │ device_class │
+# ├──────────────────────────┼───────────────────────┼─────────────────┼──────────┼──────────────┼──────────────┤
+# │ string_value             │ ds_scanning_status    │ "success"       │ success  │ None         │ None         │
+# │ numeric_value            │ temperature           │ 42.5            │ 42.5     │ None         │ None         │
+# │ missing_field            │ nonexistent           │ (absent)        │ None     │ None         │ None         │
+# │ provisioned_speed_down   │ provisioned_speed_down│ 110100480       │ 110…480  │ bit/s        │ DATA_RATE    │
+# │ provisioned_burst_down   │ provisioned_burst_down│ 412876          │ 412876   │ B            │ DATA_SIZE    │
+# └──────────────────────────┴───────────────────────┴─────────────────┴──────────┴──────────────┴──────────────┘
 
-def test_system_info_field_sensor_value(mock_runtime_data):
-    """SystemInfoFieldSensor reads field value from system_info."""
+_DATA_RATE = SensorDeviceClass.DATA_RATE
+_DATA_SIZE = SensorDeviceClass.DATA_SIZE
+
+_SYSINFO_FIELD_CASES = [
+    ("string_value", "ds_scanning_status", {"ds_scanning_status": "success"}, "success", None, None),
+    ("numeric_value", "temperature", {"temperature": 42.5}, 42.5, None, None),
+    ("missing_field", "nonexistent", {}, None, None, None),
+    ("speed_down", "provisioned_speed_down", {"provisioned_speed_down": 110100480}, 110100480, "bit/s", _DATA_RATE),
+    ("burst_down", "provisioned_burst_down", {"provisioned_burst_down": 412876}, 412876, "B", _DATA_SIZE),
+]
+
+
+@pytest.mark.parametrize(
+    ("case_id", "field", "system_info", "expected_value", "expected_unit", "expected_device_class"),
+    _SYSINFO_FIELD_CASES,
+    ids=[c[0] for c in _SYSINFO_FIELD_CASES],
+)
+def test_system_info_field_sensor(
+    mock_runtime_data,
+    case_id,
+    field,
+    system_info,
+    expected_value,
+    expected_unit,
+    expected_device_class,
+):
+    """SystemInfoFieldSensor reads value and applies unit metadata when present."""
     modem_data: dict[str, Any] = {
-        "system_info": {"ds_scanning_status": "success"},
+        "system_info": system_info,
         "downstream": [],
         "upstream": [],
     }
@@ -568,43 +602,11 @@ def test_system_info_field_sensor_value(mock_runtime_data):
         SystemInfoFieldSensor,
         mock_runtime_data,
         modem_data=modem_data,
-        field="ds_scanning_status",
+        field=field,
     )
-    assert sensor.native_value == "success"
-    assert sensor._attr_name == "DS Scanning Status"
-    assert sensor._attr_unique_id == "test_entry_cable_modem_ds_scanning_status"
-
-
-def test_system_info_field_sensor_missing(mock_runtime_data):
-    """SystemInfoFieldSensor returns None when field absent from system_info."""
-    modem_data: dict[str, Any] = {
-        "system_info": {},
-        "downstream": [],
-        "upstream": [],
-    }
-    sensor = _make_sensor(
-        SystemInfoFieldSensor,
-        mock_runtime_data,
-        modem_data=modem_data,
-        field="nonexistent",
-    )
-    assert sensor.native_value is None
-
-
-def test_system_info_field_sensor_numeric(mock_runtime_data):
-    """SystemInfoFieldSensor passes through numeric values without conversion."""
-    modem_data: dict[str, Any] = {
-        "system_info": {"temperature": 42.5},
-        "downstream": [],
-        "upstream": [],
-    }
-    sensor = _make_sensor(
-        SystemInfoFieldSensor,
-        mock_runtime_data,
-        modem_data=modem_data,
-        field="temperature",
-    )
-    assert sensor.native_value == 42.5
+    assert sensor.native_value == expected_value
+    assert getattr(sensor, "_attr_native_unit_of_measurement", None) == expected_unit
+    assert getattr(sensor, "_attr_device_class", None) == expected_device_class
 
 
 # -----------------------------------------------------------------------

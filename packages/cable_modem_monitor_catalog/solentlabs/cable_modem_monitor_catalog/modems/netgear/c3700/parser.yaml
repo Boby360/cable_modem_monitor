@@ -80,12 +80,10 @@ system_info:
           fields:
             - offset: 1
               field: provisioned_speed_down
-              type: float
-              scale: 0.000001
+              type: integer
             - offset: 2
               field: provisioned_speed_up
-              type: float
-              scale: 0.000001
+              type: integer
     - format: javascript
       resource: "/RouterStatus.htm"
       functions:

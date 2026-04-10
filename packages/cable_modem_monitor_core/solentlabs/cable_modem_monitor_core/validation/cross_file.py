@@ -11,12 +11,19 @@ alone.
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from ..models.modem_config import ModemConfig
 from ..models.parser_config import ParserConfig
-from ..models.parser_config.system_info import JSSystemInfoSource
+from ..models.parser_config.system_info import (
+    JSSystemInfoSource,
+    SystemInfoSection,
+    XMLSystemInfoSource,
+)
 
 # Formats valid per transport (same constraint table as MODEM_YAML_SPEC)
 _VALID_FORMATS: dict[str, frozenset[str]] = {
+    "cbn": frozenset({"xml"}),
     "hnap": frozenset({"hnap"}),
     "http": frozenset({"table", "table_transposed", "html_fields", "javascript", "javascript_json", "json"}),
 }
@@ -35,6 +42,7 @@ def validate_cross_file(modem: ModemConfig, parser: ParserConfig) -> list[str]:
     errors: list[str] = []
     _check_transport_format(modem, parser, errors)
     _check_aggregate_collisions(modem, parser, errors)
+    _check_provisioned_speed_direction(parser, errors)
     return errors
 
 
@@ -62,7 +70,7 @@ def _check_aggregate_collisions(modem: ModemConfig, parser: ParserConfig, errors
     if not parser.aggregate or parser.system_info is None:
         return
 
-    system_info_fields = _collect_system_info_fields(parser)
+    system_info_fields = _collect_system_info_fields(parser.system_info)
     for agg_name in parser.aggregate:
         if agg_name in system_info_fields:
             errors.append(f"aggregate field '{agg_name}' collides with system_info " f"field — one source per field")
@@ -89,7 +97,7 @@ def _collect_section_formats(parser: ParserConfig) -> list[tuple[str, str]]:
     return results
 
 
-def _collect_system_info_fields(parser: ParserConfig) -> set[str]:
+def _collect_system_info_fields(section: SystemInfoSection) -> set[str]:
     """Collect all field names from system_info sources.
 
     Handles all source types: html_fields, hnap, json have a ``fields``
@@ -98,10 +106,7 @@ def _collect_system_info_fields(parser: ParserConfig) -> set[str]:
     """
     fields: set[str] = set()
 
-    if parser.system_info is None:
-        return fields
-
-    for source in parser.system_info.sources:
+    for source in section.sources:
         if isinstance(source, JSSystemInfoSource):
             for func in source.functions:
                 for js_field in func.fields:
@@ -111,3 +116,45 @@ def _collect_system_info_fields(parser: ParserConfig) -> set[str]:
                 fields.add(mapping.field)
 
     return fields
+
+
+class _DocsisDirection(StrEnum):
+    """DOCSIS MULPI service flow direction values."""
+
+    DOWNSTREAM = "1"
+    UPSTREAM = "2"
+
+
+# Provisioned speed/burst field names and their expected DOCSIS direction.
+_DIRECTION_FIELDS: dict[str, _DocsisDirection] = {
+    "provisioned_speed_down": _DocsisDirection.DOWNSTREAM,
+    "provisioned_speed_up": _DocsisDirection.UPSTREAM,
+    "provisioned_burst_down": _DocsisDirection.DOWNSTREAM,
+    "provisioned_burst_up": _DocsisDirection.UPSTREAM,
+}
+
+
+def _check_provisioned_speed_direction(parser: ParserConfig, errors: list[str]) -> None:
+    """Validate that provisioned speed child_aggregates use correct DOCSIS directions.
+
+    DOCSIS MULPI defines service flow direction 1 = downstream,
+    2 = upstream. A swap produces plausible-looking but inverted
+    speed values that are easy to miss in review.
+    """
+    if parser.system_info is None:
+        return
+
+    for source in parser.system_info.sources:
+        if not isinstance(source, XMLSystemInfoSource):
+            continue
+        for agg in source.child_aggregates:
+            expected = _DIRECTION_FIELDS.get(agg.field)
+            if expected is None:
+                continue
+            actual = agg.filter.get("direction")
+            if actual is not None and actual != expected:
+                errors.append(
+                    f"child_aggregate '{agg.field}' filters on direction "
+                    f"'{actual}' but DOCSIS direction for {expected.name.lower()} "
+                    f"is '{expected}' — values will be swapped"
+                )

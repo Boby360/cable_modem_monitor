@@ -201,8 +201,8 @@ _CONSUMED_SYSTEM_INFO_FIELDS = frozenset({
 # Units and device classes for dynamic system_info fields.
 # Fields not listed here display as unitless strings.
 _SYSTEM_INFO_FIELD_UNITS: dict[str, tuple[str, SensorDeviceClass | None, SensorStateClass | None]] = {
-    "provisioned_speed_down": ("Mbit/s", SensorDeviceClass.DATA_RATE, SensorStateClass.MEASUREMENT),
-    "provisioned_speed_up": ("Mbit/s", SensorDeviceClass.DATA_RATE, SensorStateClass.MEASUREMENT),
+    "provisioned_speed_down": ("bit/s", SensorDeviceClass.DATA_RATE, SensorStateClass.MEASUREMENT),
+    "provisioned_speed_up": ("bit/s", SensorDeviceClass.DATA_RATE, SensorStateClass.MEASUREMENT),
     "provisioned_burst_down": ("B", SensorDeviceClass.DATA_SIZE, SensorStateClass.MEASUREMENT),
     "provisioned_burst_up": ("B", SensorDeviceClass.DATA_SIZE, SensorStateClass.MEASUREMENT),
 }

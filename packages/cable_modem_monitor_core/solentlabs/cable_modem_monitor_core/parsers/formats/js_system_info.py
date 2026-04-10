@@ -33,21 +33,21 @@ class JSSystemInfoParser(BaseParser):
     def __init__(self, config: JSSystemInfoSource) -> None:
         self._config = config
 
-    def parse(self, resources: dict[str, Any]) -> dict[str, str]:
+    def parse(self, resources: dict[str, Any]) -> dict[str, Any]:
         """Extract system_info fields from configured JS functions.
 
         Args:
             resources: Resource dict (path -> BeautifulSoup).
 
         Returns:
-            Dict of system_info field names to string values.
+            Dict of system_info field names to typed values.
         """
         soup = resources.get(self._config.resource)
         if soup is None:
             _logger.warning("Resource '%s' not found", self._config.resource)
             return {}
 
-        result: dict[str, str] = {}
+        result: dict[str, Any] = {}
 
         for func in self._config.functions:
             raw_data = _extract_tag_value_list(soup, func.name)
@@ -80,6 +80,6 @@ class JSSystemInfoParser(BaseParser):
                     scale=field_def.scale,
                 )
                 if converted is not None:
-                    result[field_def.field] = str(converted)
+                    result[field_def.field] = converted
 
         return result

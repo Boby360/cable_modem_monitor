@@ -1,4 +1,4 @@
-# v3.14 Specifications
+# Platform Specifications
 
 | Document | Governs |
 |----------|---------|
@@ -24,7 +24,7 @@
 | [VERIFICATION_STATUS.md](VERIFICATION_STATUS.md) | Parser status enum and verification lifecycle |
 | [ONBOARDING_SPEC.md](ONBOARDING_SPEC.md) | MCP-driven modem onboarding workflow |
 
-### HA Integration Specs
+## HA Integration Specs
 
 | Document | Governs |
 |----------|---------|
