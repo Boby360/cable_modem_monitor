@@ -451,8 +451,9 @@ included automatically when new diagnostics are added to the model.
 - Sanitized recent logs from both the HA adapter
   (`custom_components.cable_modem_monitor`) and Core package
   (`solentlabs.cable_modem_monitor_core`) loggers
-- Full channel dump (downstream + upstream with all fields)
-- Full system_info dump (all fields, including dynamic fields)
+- Runtime state summary (`modem_data` — connection + health only)
+- Full `system_info` pass-through (all parser-extracted and computed fields)
+- Full channel dump (`downstream_channels` + `upstream_channels`)
 - Config entry details (host, protocol, supports_icmp, etc.)
 - Coordinator state (last_update_success, update_interval)
 - Generic auth diagnostics (per-strategy, not HNAP-specific)
@@ -466,34 +467,47 @@ included automatically when new diagnostics are added to the model.
 **No raw HTML capture.** Use `har-capture` for collecting raw modem
 data for parser development.
 
-### `modem_data` Summary
+### Diagnostics Top-Level Keys
 
-The `modem_data` key in diagnostics output is a curated triage summary
-that cherry-picks fields from three sources. All field names use Core
-canonical names (no display-name suffixes). The full `system_info` dict
-is also included as a separate top-level key for tier-3 debugging.
+The diagnostics output disassembles Core's nested `modem_data` dict
+into separate top-level keys. The boundary between sections is
+**source**: `modem_data` draws from snapshot and health evaluations
+(orchestrator-derived state), while `system_info`, `downstream_channels`,
+and `upstream_channels` are verbatim pass-throughs of Core's parser
+output. The diagnostics builder never copies values from `system_info`
+into `modem_data`.
 
-#### Snapshot State (enums converted to string values)
+| Key | Contents | Source |
+|-----|----------|--------|
+| `config_entry` | Host, protocol, model, credentials flag | HA config entry |
+| `core_diagnostics` | Poll timing, auth state, circuit breaker | `orchestrator.diagnostics()` |
+| `data_coordinator` | Last success, update interval | HA coordinator |
+| `health_coordinator` | Last success, update interval | HA coordinator (conditional) |
+| `modem_data` | Evaluated connection + health state | Snapshot + health probe |
+| `system_info` | All parser-extracted and computed fields | `snapshot.modem_data["system_info"]` pass-through |
+| `downstream_channels` | Per-channel data (sparse dicts) | `snapshot.modem_data["downstream"]` pass-through |
+| `upstream_channels` | Per-channel data (sparse dicts) | `snapshot.modem_data["upstream"]` pass-through |
+
+### `modem_data` — Evaluated State
+
+The `modem_data` key contains **orchestrator-derived connection state
+and health probe results**. Every field comes from `snapshot.*` or
+`health_info.*` — evaluated assessments of modem reachability, not
+raw parser output.
+
+Modem identity (version, model), counters (error totals), and
+measurements (channel counts, uptime) belong in `system_info` —
+they are Core parser output, not HA-layer evaluations.
+
+#### Connection State (from snapshot, enums converted to string values)
 
 | Field | Type | Source |
 |-------|------|--------|
 | `connection_status` | string | `snapshot.connection_status` |
-| `docsis_status` | string | `snapshot.docsis_status` |
 | `collector_signal` | string | `snapshot.collector_signal` |
 | `error` | string | `snapshot.error` (empty on success) |
 
-#### system\_info (Core canonical names)
-
-| Field | Type | Source |
-|-------|------|--------|
-| `downstream_channel_count` | int | Coordinator-computed or native |
-| `upstream_channel_count` | int | Coordinator-computed or native |
-| `total_corrected` | int | Aggregate or native (see PARSING_SPEC § Aggregate) |
-| `total_uncorrected` | int | Aggregate or native (see PARSING_SPEC § Aggregate) |
-| `software_version` | string | Parser-extracted |
-| `system_uptime` | string | Parser-extracted |
-
-#### health\_info (prefers health coordinator over snapshot)
+#### Health State (prefers health coordinator over snapshot)
 
 | Field | Type | Source |
 |-------|------|--------|
@@ -501,9 +515,51 @@ is also included as a separate top-level key for tier-3 debugging.
 | `icmp_latency_ms` | float or null | ICMP round-trip (null if not supported) |
 | `http_latency_ms` | float or null | HTTP response time (null if not attempted) |
 
-**Naming rule:** Output keys match `system_info` dict keys exactly.
-HA entity display names (e.g., "Total Corrected Errors") are a separate
-concern owned by `sensor.py`, not the diagnostics layer.
+### `system_info` — Parser Output
+
+Verbatim pass-through of Core's `system_info` dict. Contains parser-
+extracted fields, coordinator-computed counts, and aggregated totals.
+This is the single source of truth for modem identity, counters, and
+status.
+
+Fields vary by modem (sparse dict). Common fields include:
+
+| Field | Type | Origin |
+|-------|------|--------|
+| `downstream_channel_count` | int | Coordinator-computed (always present) |
+| `upstream_channel_count` | int | Coordinator-computed (always present) |
+| `total_corrected` | int | Aggregate or native (see PARSING_SPEC § Aggregate) |
+| `total_uncorrected` | int | Aggregate or native (see PARSING_SPEC § Aggregate) |
+| `docsis_status` | string | Parser-extracted or orchestrator-enriched (see below) |
+| `software_version` | string | Parser-extracted |
+| `system_uptime` | string | Parser-extracted |
+| `model_name` | string | Parser-extracted (when available) |
+| `hardware_version` | string | Parser-extracted (when available) |
+
+#### `docsis_status` enrichment
+
+`docsis_status` follows the same enrichment pattern as error totals:
+the parser provides it when the modem exposes a native value, and the
+orchestrator fills it in from channel `lock_status` when absent. If
+neither the parser nor the orchestrator can determine the value (no
+native field, no `lock_status` on channels), the field stays absent
+in `system_info` — same sparse-dict rule as other fields. No sensor
+is created.
+
+1. **Parser provides it** — YAML `map` entries normalize vendor values
+   to the canonical `"Operational"` (see SYSTEM_INFO_SPEC § Canonical
+   Values). Non-mapped values pass through as raw diagnostic strings
+   (e.g., `"Ranging"`).
+
+2. **Parser does not provide it** — the orchestrator derives it from
+   downstream channel `lock_status` fields and writes it into
+   `system_info`. See RUNTIME_POLLING_SPEC § Status Derivation for
+   the derivation rules (including when derivation is not possible).
+
+One field, one location in the data layer. `snapshot.docsis_status`
+reads from `system_info["docsis_status"]`, falling back to `"unknown"`
+when the field is absent (used internally by the HA status cascade,
+not exposed as a sensor).
 
 ---
 

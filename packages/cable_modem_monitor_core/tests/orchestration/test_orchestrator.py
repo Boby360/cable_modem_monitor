@@ -307,8 +307,8 @@ class TestZeroChannels:
 # │ All "locked"                 │ 0      │ PARTIAL_LOCK     │ —                    │
 # │ Some "locked", some not      │ > 0    │ PARTIAL_LOCK     │ —                    │
 # │ None "locked"                │ > 0    │ NOT_LOCKED       │ —                    │
-# │ No DS channels               │ any    │ NOT_LOCKED       │ —                    │
-# │ lock_status absent           │ > 0    │ UNKNOWN          │ —                    │
+# │ No DS channels               │ any    │ UNKNOWN(absent)  │ —                    │
+# │ lock_status absent           │ > 0    │ UNKNOWN(absent)  │ —                    │
 # │ lock_status absent           │ > 0    │ raw string       │ docsis_status        │
 # │ lock_status absent           │ > 0    │ raw string       │ docsis_status (lc)   │
 # │ lock_status absent           │ > 0    │ raw string       │ non-operational      │
@@ -322,7 +322,7 @@ DOCSIS_STATUS_CASES = [
     ([{"lock_status": "locked"},
       {"lock_status": "not_locked"}],    2,        DocsisStatus.PARTIAL_LOCK, "some locked",              None),
     ([{"lock_status": "not_locked"}] * 3, 2,       DocsisStatus.NOT_LOCKED,   "none locked",              None),
-    ([],                                 2,        DocsisStatus.NOT_LOCKED,   "no DS channels",           None),
+    ([],                                 2,        DocsisStatus.UNKNOWN,      "no DS channels",           None),
     ([{"frequency": 600}] * 3,          2,        DocsisStatus.UNKNOWN,      "no lock_status field",     None),
     ([{"frequency": 600}] * 3,          2,        "OPERATIONAL",             "fallback: docsis_status",
      {"docsis_status": "OPERATIONAL"}),
@@ -359,6 +359,62 @@ def test_docsis_status_derivation(
     snapshot = orch.get_modem_data()
 
     assert snapshot.docsis_status == expected
+
+
+# ------------------------------------------------------------------
+# enrich_docsis_status — unit-level (system_info mutation contract)
+# ------------------------------------------------------------------
+
+_US1 = [{"channel_id": 1}]
+_LOCKED = {"lock_status": "locked"}
+_UNLOCKED = {"lock_status": "not_locked"}
+_NO_LOCK = {"frequency": 600}
+
+# fmt: off
+ENRICH_CASES = [
+    # (ds,                          us,   sysinfo,                       expected,       id)
+    # Derivable from lock_status
+    ([_LOCKED] * 3,                 _US1,  {},                           "Operational",  "all-locked+us"),
+    ([_LOCKED] * 3,                 [],    {},                           "partial_lock", "all-locked-no-us"),
+    ([_LOCKED, _UNLOCKED],          _US1,  {},                           "partial_lock", "some-locked"),
+    ([_UNLOCKED] * 2,               _US1,  {},                           "not_locked",   "none-locked"),
+    # Not derivable — field stays absent
+    ([],                            _US1,  {},                           None,           "no-ds"),
+    ([_NO_LOCK] * 2,                _US1,  {},                           None,           "no-lock-status"),
+    # Parser provided — not overwritten
+    ([_LOCKED] * 3,                 _US1,  {"docsis_status": "Allowed"}, "Allowed",      "parser-wins"),
+    ([_NO_LOCK] * 2,                _US1,  {"docsis_status": "Ranging"}, "Ranging",      "parser-no-lock"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    "ds_channels,upstream,system_info,expected_docsis,desc",
+    ENRICH_CASES,
+    ids=[c[4] for c in ENRICH_CASES],
+)
+def test_enrich_docsis_status(
+    ds_channels: list[dict[str, Any]],
+    upstream: list[dict[str, Any]],
+    system_info: dict[str, Any],
+    expected_docsis: str | None,
+    desc: str,
+) -> None:
+    """enrich_docsis_status writes to system_info or leaves it absent."""
+    from solentlabs.cable_modem_monitor_core.orchestration.status import enrich_docsis_status
+
+    modem_data: dict[str, Any] = {
+        "downstream": ds_channels,
+        "upstream": upstream,
+        "system_info": dict(system_info),
+    }
+
+    enrich_docsis_status(modem_data)
+
+    if expected_docsis is None:
+        assert "docsis_status" not in modem_data["system_info"]
+    else:
+        assert modem_data["system_info"]["docsis_status"] == expected_docsis
 
 
 # ==================================================================

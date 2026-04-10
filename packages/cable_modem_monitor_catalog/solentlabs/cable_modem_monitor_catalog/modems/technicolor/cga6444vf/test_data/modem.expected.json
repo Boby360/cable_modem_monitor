@@ -234,6 +234,7 @@
     }
   ],
   "system_info": {
+    "docsis_status": "Operational",
     "downstream_channel_count": 26,
     "hardware_version": "1.0.0",
     "software_version": "19.3B80-3.5.13",

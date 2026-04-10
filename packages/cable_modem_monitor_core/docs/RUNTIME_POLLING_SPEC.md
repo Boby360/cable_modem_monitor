@@ -110,9 +110,9 @@ Each poll:
 
 ## Status Derivation
 
-The orchestrator derives two status fields after each poll:
+The orchestrator derives status fields after each poll:
 
-**`connection_status`** — from pipeline outcome:
+**`connection_status`** — from pipeline outcome (snapshot field):
 
 | Condition | Value |
 |-----------|-------|
@@ -122,25 +122,32 @@ The orchestrator derives two status fields after each poll:
 | Auth failure / lockout | `auth_failed` |
 | Connection error / timeout | `unreachable` |
 
-**`docsis_status`** — from normalized `lock_status` fields on
-downstream channels (see
-[PARSING_SPEC.md](PARSING_SPEC.md#field-guarantees) for `lock_status`
-normalization):
+**`docsis_status`** — enriched into `system_info` (same pattern as
+error totals and channel counts). The parser provides it when the
+modem exposes a native value; the orchestrator fills it in when
+absent. `snapshot.docsis_status` reads from the enriched
+`system_info["docsis_status"]`.
+
+*Parser provides `docsis_status`:* YAML `map` entries normalize
+vendor values to the canonical `"Operational"` (see
+SYSTEM_INFO_SPEC § Canonical Values). Non-mapped values pass through
+as raw diagnostic strings (e.g., `"Ranging"`). The orchestrator does
+not overwrite a parser-provided value.
+
+*Parser does not provide `docsis_status`:* The orchestrator derives
+it from downstream channel `lock_status` fields and writes it into
+`system_info`. If the data needed for derivation is not available
+(no downstream channels, or channels lack `lock_status`), the field
+stays absent — same sparse-dict rule as other system_info fields.
+No sensor is created when the field is absent.
 
 | Condition | Value |
 |-----------|-------|
-| All DS `lock_status == "locked"` AND upstream present | `operational` |
-| Some DS `lock_status == "locked"` | `partial_lock` |
-| No DS channels locked | `not_locked` |
-| No DS channels | `not_locked` |
-| No `lock_status` + system_info present | raw `system_info.docsis_status` string |
-| No `lock_status` + no system_info      | `unknown`                              |
-
-When downstream channels lack `lock_status`, the derivation falls back
-to `system_info.docsis_status` and returns the raw string.  Modem-
-specific values are normalized to `"Operational"` via YAML `map`
-entries in parser.yaml (see SYSTEM_INFO_SPEC.md § Canonical Values).
-Only a missing or empty field produces `"unknown"`.
+| All DS `lock_status == "locked"` AND upstream present | `"Operational"` |
+| Some DS `lock_status == "locked"` | `"partial_lock"` |
+| No DS channels locked | `"not_locked"` |
+| No DS channels | *(absent — cannot derive)* |
+| Channels lack `lock_status` | *(absent — cannot derive)* |
 
 The platform adapter composes `connection_status`, `docsis_status`,
 and `health_status` (from the health pipeline) into a display state

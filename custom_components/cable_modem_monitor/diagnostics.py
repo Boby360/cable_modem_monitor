@@ -337,14 +337,7 @@ def _build_diagnostics_dict(
             health_info = snapshot.health_info
         diagnostics["modem_data"] = {
             "connection_status": snapshot.connection_status.value,
-            "docsis_status": snapshot.docsis_status,
             "collector_signal": snapshot.collector_signal.value,
-            "downstream_channel_count": system_info.get("downstream_channel_count", 0),
-            "upstream_channel_count": system_info.get("upstream_channel_count", 0),
-            "total_corrected": system_info.get("total_corrected", 0),
-            "total_uncorrected": system_info.get("total_uncorrected", 0),
-            "software_version": system_info.get("software_version", "Unknown"),
-            "system_uptime": system_info.get("system_uptime", "Unknown"),
             "health_status": (health_info.health_status.value if health_info else "none"),
             "icmp_latency_ms": (health_info.icmp_latency_ms if health_info else None),
             "http_latency_ms": (health_info.http_latency_ms if health_info else None),
@@ -353,8 +346,8 @@ def _build_diagnostics_dict(
     else:
         diagnostics["modem_data"] = {"note": "No snapshot available"}
 
-    # Full system_info pass-through — includes tier 3 fields not
-    # cherry-picked in the modem_data summary above.
+    # Full system_info pass-through — single source of truth for modem
+    # identity, counters, and status.  See HA_ADAPTER_SPEC § system_info.
     if modem_data:
         diagnostics["system_info"] = system_info
 

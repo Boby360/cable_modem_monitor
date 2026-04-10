@@ -370,6 +370,7 @@
     }
   ],
   "system_info": {
+    "docsis_status": "Operational",
     "current_time": "Tue Feb 10 21:21:29 2026",
     "downstream_channel_count": 34,
     "system_uptime": "65 days 20h:18m:58s",

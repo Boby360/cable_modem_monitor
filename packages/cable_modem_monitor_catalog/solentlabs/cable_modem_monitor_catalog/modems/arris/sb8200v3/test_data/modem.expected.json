@@ -60,6 +60,7 @@
     }
   ],
   "system_info": {
+    "docsis_status": "Operational",
     "downstream_channel_count": 6,
     "hardware_version": "SB8200v3",
     "software_version": "AC01.02.003_072823_8200.03.07.735.CT",

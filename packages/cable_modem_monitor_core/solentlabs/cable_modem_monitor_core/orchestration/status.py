@@ -1,7 +1,8 @@
 """Status derivation — connection and DOCSIS status from modem data.
 
-Pure functions that derive ConnectionStatus and DocsisStatus from
-a successful collection result. No side effects, no state.
+Pure functions that derive ConnectionStatus from a successful collection
+result.  ``enrich_docsis_status`` enriches ``system_info`` in-place
+when the parser does not provide ``docsis_status``.
 
 See RUNTIME_POLLING_SPEC.md Status Derivation and UC-07.
 """
@@ -43,48 +44,41 @@ def derive_connection_status(modem_data: dict[str, Any]) -> ConnectionStatus:
     return ConnectionStatus.NO_SIGNAL
 
 
-def derive_docsis_status(modem_data: dict[str, Any]) -> str:
-    """Derive DOCSIS status from downstream channel lock_status fields.
+def enrich_docsis_status(modem_data: dict[str, Any]) -> None:
+    """Enrich ``system_info`` with ``docsis_status`` when absent.
 
-    Returns a ``DOCSIS_*`` constant for the well-known lock-based
-    states (``operational``, ``partial_lock``, ``not_locked``).  When
-    channels lack ``lock_status``, falls back to the raw
-    ``system_info.docsis_status`` string so modem-reported diagnostics
-    (e.g. ``"Ranging"``) pass through instead of being collapsed to
-    ``"unknown"``.
+    Same enrichment pattern as error totals and channel counts: the
+    parser provides the field when the modem exposes a native value;
+    this function fills it in from channel ``lock_status`` when the
+    parser did not.  A parser-provided value is never overwritten.
 
-    See RUNTIME_POLLING_SPEC.md Status Derivation and UC-07.
+    Writes directly into ``modem_data["system_info"]``.
+
+    See RUNTIME_POLLING_SPEC.md Status Derivation.
     """
+    system_info = modem_data.setdefault("system_info", {})
+
+    if "docsis_status" in system_info:
+        return  # parser provided it — don't overwrite
+
     downstream = modem_data.get("downstream", [])
     upstream = modem_data.get("upstream", [])
 
+    # Can't derive without downstream channels that have lock_status.
+    # Same sparse-dict rule as other system_info fields: if the data
+    # isn't available, the field stays absent (no sensor created).
     if not downstream:
-        return DocsisStatus.NOT_LOCKED
+        return
 
-    # Check if lock_status field exists on any channel
     has_lock_status = any("lock_status" in ch for ch in downstream)
     if not has_lock_status:
-        return _fallback_from_system_info(modem_data)
+        return
 
     locked_count = sum(1 for ch in downstream if ch.get("lock_status") == "locked")
 
     if locked_count == 0:
-        return DocsisStatus.NOT_LOCKED
-
-    if locked_count == len(downstream) and len(upstream) > 0:
-        return DocsisStatus.OPERATIONAL
-
-    return DocsisStatus.PARTIAL_LOCK
-
-
-def _fallback_from_system_info(modem_data: dict[str, Any]) -> str:
-    """Fall back to system_info when channels lack lock_status.
-
-    Returns the raw ``system_info.docsis_status`` string so modem-
-    reported diagnostics pass through.  Returns ``"unknown"`` only
-    when the field is absent or empty.
-    """
-    system_info = modem_data.get("system_info", {})
-    reported = system_info.get("docsis_status") or ""
-    value = reported.strip()
-    return value if value else DocsisStatus.UNKNOWN
+        system_info["docsis_status"] = DocsisStatus.NOT_LOCKED
+    elif locked_count == len(downstream) and len(upstream) > 0:
+        system_info["docsis_status"] = DocsisStatus.OPERATIONAL
+    else:
+        system_info["docsis_status"] = DocsisStatus.PARTIAL_LOCK

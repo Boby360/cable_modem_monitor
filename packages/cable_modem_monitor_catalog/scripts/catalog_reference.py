@@ -45,7 +45,7 @@ def isp_to_badge(isp_name: str) -> str:
             badge_text = quote(entry["abbrev"], safe="")
             url = f"https://img.shields.io/badge/-{badge_text}-{entry['color']}?style=flat-square"
             badge = f'![{entry["abbrev"]}]({url} "{entry["name"]}")'
-            anchor_key = key.replace(" ", "-").replace("&", "")
+            anchor_key = entry.get("anchor", key).replace(" ", "-").replace("&", "")
             return f"[{badge}](#{anchor_key})"
     abbrev = isp_name.strip()[:4].upper()
     badge_text = quote(abbrev, safe="")

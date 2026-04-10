@@ -30,7 +30,7 @@ from .signals import (
     HealthStatus,
     RestartPhase,
 )
-from .status import derive_connection_status, derive_docsis_status
+from .status import derive_connection_status, enrich_docsis_status
 
 if TYPE_CHECKING:
     import threading
@@ -358,7 +358,8 @@ class Orchestrator:
 
         # Derive statuses
         connection_status = derive_connection_status(modem_data)
-        docsis_status = derive_docsis_status(modem_data)
+        enrich_docsis_status(modem_data)
+        docsis_status = modem_data.get("system_info", {}).get("docsis_status", DocsisStatus.UNKNOWN)
 
         # Counter-reset detection
         self._check_counter_reset(modem_data)

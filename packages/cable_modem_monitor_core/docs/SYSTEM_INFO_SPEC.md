@@ -237,7 +237,7 @@ to normalize modem-specific raw values to the canonical form.
 
 | Field | Canonical value | Raw examples | Purpose |
 |-------|----------------|--------------|---------|
-| `docsis_status` | `"Operational"` | `"Allowed"`, `"Connected"`, `"Good"`, `"success"`, `"online"` | Orchestrator falls back to this string when channels lack `lock_status`. Non-`"Operational"` values pass through as raw diagnostic strings. |
+| `docsis_status` | `"Operational"` | `"Allowed"`, `"Connected"`, `"Good"`, `"success"`, `"online"` | Canonical success value. When the parser provides this field, the orchestrator uses it as-is. When absent, the orchestrator enriches `system_info` from channel `lock_status` (see RUNTIME_POLLING_SPEC § Status Derivation). Non-`"Operational"` values pass through as raw diagnostic strings. |
 
 ```yaml
 # Example: normalize modem-specific docsis_status to canonical value

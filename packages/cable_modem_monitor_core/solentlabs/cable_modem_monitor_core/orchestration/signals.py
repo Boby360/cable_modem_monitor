@@ -47,14 +47,18 @@ class ConnectionStatus(Enum):
 class DocsisStatus(StrEnum):
     """Well-known DOCSIS status values.
 
-    ``derive_docsis_status`` returns ``str`` — either one of these
-    constants or a raw modem-reported string that passed through the
-    YAML map without matching.  StrEnum members compare equal to their
-    string values, so ``docsis == DocsisStatus.NOT_LOCKED`` works
-    whether *docsis* is an enum member or a plain ``"not_locked"``.
+    ``enrich_docsis_status`` writes one of these into ``system_info``
+    when the parser does not provide ``docsis_status``.  StrEnum members
+    compare equal to their string values, so
+    ``docsis == DocsisStatus.OPERATIONAL`` works whether *docsis* is an
+    enum member or a plain ``"Operational"`` string.
+
+    ``OPERATIONAL`` uses title-case ``"Operational"`` to match the
+    canonical ``system_info`` value (see SYSTEM_INFO_SPEC § Canonical
+    Values).  Other values are orchestrator-specific labels.
     """
 
-    OPERATIONAL = "operational"
+    OPERATIONAL = "Operational"
     PARTIAL_LOCK = "partial_lock"
     NOT_LOCKED = "not_locked"
     UNKNOWN = "unknown"

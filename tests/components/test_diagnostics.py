@@ -233,6 +233,15 @@ def test_parse_legacy_record_tuple_integer_level():
     assert entry["level"] == "WARNING"
 
 
+def test_parse_legacy_record_attribute_error():
+    """Record with getMessage but broken .name triggers except handler."""
+    record = MagicMock(spec=[])
+    record.getMessage = lambda: "test"
+    type(record).name = property(lambda self: (_ for _ in ()).throw(AttributeError("no name")))
+
+    assert _parse_legacy_record(record) is None
+
+
 # -----------------------------------------------------------------------
 # Log file reading
 # -----------------------------------------------------------------------
@@ -355,6 +364,23 @@ def test_get_recent_logs_log_file_exception():
     assert "No logs captured" in logs[0]["message"]
 
 
+def test_get_recent_logs_system_log_exception():
+    """Exception accessing system_log is caught and falls through."""
+    hass = MagicMock()
+    hass.data = {"system_log": MagicMock(handler=property(lambda s: 1 / 0))}
+    type(hass.data["system_log"]).handler = property(lambda self: (_ for _ in ()).throw(RuntimeError("broken")))
+    hass.config.path.return_value = "/nonexistent/home-assistant.log"
+
+    with patch(
+        "custom_components.cable_modem_monitor.diagnostics.get_log_entries",
+        return_value=[],
+    ):
+        logs = _get_recent_logs(hass, max_records=10)
+
+    assert len(logs) == 1
+    assert "No logs captured" in logs[0]["message"]
+
+
 # -----------------------------------------------------------------------
 # async_get_config_entry_diagnostics — entry point
 # -----------------------------------------------------------------------
@@ -405,14 +431,15 @@ async def test_diagnostics_delegates_to_builder(mock_runtime_data):
     assert "core_diagnostics" in result
     assert "modem_data" in result
     assert result["modem_data"]["connection_status"] == "online"
-    # modem_data uses Core canonical names — no _errors suffix
-    assert result["modem_data"]["total_corrected"] == 150
-    assert result["modem_data"]["total_uncorrected"] == 3
-    assert "total_corrected_errors" not in result["modem_data"]
-    assert "total_uncorrected_errors" not in result["modem_data"]
-    # Full system_info pass-through (includes tier 3 fields)
+    # modem_data contains only evaluated state — no system_info fields
+    assert "total_corrected" not in result["modem_data"]
+    assert "software_version" not in result["modem_data"]
+    assert "docsis_status" not in result["modem_data"]
+    # Full system_info pass-through (single source of truth)
     assert "system_info" in result
     assert result["system_info"]["software_version"] == "4502.9.016"
+    assert result["system_info"]["total_corrected"] == 150
+    assert result["system_info"]["total_uncorrected"] == 3
 
 
 # -----------------------------------------------------------------------
@@ -497,3 +524,27 @@ async def test_diagnostics_health_coord_data_none(mock_runtime_data):
         result = await async_get_config_entry_diagnostics(hass, entry)
 
     assert result["modem_data"]["health_status"] == "responsive"
+
+
+async def test_diagnostics_log_retrieval_exception(mock_runtime_data):
+    """Builder catches log retrieval failure and includes error note."""
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.runtime_data = mock_runtime_data
+    entry.data = MOCK_ENTRY_DATA
+    entry.title = "Solent Labs TPS-2000"
+    entry.entry_id = "test_123"
+
+    async def fake_executor(fn, *args):
+        return fn(*args)
+
+    hass.async_add_executor_job = fake_executor
+
+    with patch(
+        "custom_components.cable_modem_monitor.diagnostics._get_recent_logs",
+        side_effect=RuntimeError("log crash"),
+    ):
+        result = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert result["recent_logs"]["note"] == "Unable to retrieve recent logs"
+    assert "log crash" in result["recent_logs"]["error"]

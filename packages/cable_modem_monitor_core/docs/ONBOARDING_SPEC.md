@@ -1468,7 +1468,6 @@ files to its directory — the test is automatic.
 
 ---
 
-
 ### Static validation (inside `generate_config`)
 
 The `generate_config` tool validates before returning:

@@ -363,7 +363,7 @@ class Orchestrator:
         8. Signal HealthMonitor: record_collection_end(success)
         9. If collection failed, apply signal → policy mapping
         10. On success, derive connection_status from data
-        11. Derive docsis_status from lock_status fields
+        11. Enrich system_info.docsis_status if absent (from lock_status)
         12. Read latest HealthInfo from HealthMonitor (if present)
         13. Detect state transitions (unreachable → online)
         14. Return combined result
@@ -591,7 +591,9 @@ class ModemSnapshot:
 
     Attributes:
         connection_status: Derived from collector signal and data.
-        docsis_status: Derived from downstream lock_status fields.
+        docsis_status: Read from system_info["docsis_status"] (parser-
+            provided or orchestrator-enriched from lock_status fields).
+            Falls back to "unknown" when the field is absent.
         modem_data: Parsed channel and system_info data. None on
             collection failure. Present (possibly with empty channels)
             on successful collection. Channel counts and aggregate
@@ -604,7 +606,7 @@ class ModemSnapshot:
     """
 
     connection_status: ConnectionStatus
-    docsis_status: DocsisStatus
+    docsis_status: str
     modem_data: ModemData | None = None
     health_info: HealthInfo | None = None
     collector_signal: CollectorSignal = CollectorSignal.OK
@@ -700,10 +702,13 @@ class ConnectionStatus(Enum):
 # is a health probe signal. ConnectionStatus has no DEGRADED value.
 
 
-class DocsisStatus(Enum):
-    """DOCSIS lock status derived from downstream channels."""
+class DocsisStatus(StrEnum):
+    """Well-known DOCSIS status values.
 
-    OPERATIONAL = "operational"
+    OPERATIONAL matches the canonical system_info value.
+    """
+
+    OPERATIONAL = "Operational"
     PARTIAL_LOCK = "partial_lock"
     NOT_LOCKED = "not_locked"
     UNKNOWN = "unknown"
@@ -773,10 +778,11 @@ def get_modem_data(self) -> ModemSnapshot:
     self._auth_failure_streak = 0
 
     status = self._derive_connection_status(result.modem_data)
-    # ... docsis_status ...
+    self._enrich_docsis_status(result.modem_data)  # fills system_info if absent
+    docsis_status = (result.modem_data or {}).get("system_info", {}).get("docsis_status", "unknown")
     health_info = self._health_monitor.latest if self._health_monitor else None
     # ... transition detection ...
-    return ModemSnapshot(connection_status=status, health_info=health_info, ...)
+    return ModemSnapshot(connection_status=status, docsis_status=docsis_status, health_info=health_info, ...)
 ```
 
 ### Connection Status Derivation

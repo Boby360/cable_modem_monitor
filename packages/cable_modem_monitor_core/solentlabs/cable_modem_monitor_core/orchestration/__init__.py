@@ -34,7 +34,7 @@ from .signals import (
     HealthStatus,
     RestartPhase,
 )
-from .status import derive_connection_status, derive_docsis_status
+from .status import derive_connection_status, enrich_docsis_status
 
 __all__ = [
     "ChannelStabilityMonitor",
@@ -58,7 +58,7 @@ __all__ = [
     "RestartResult",
     "SignalPolicy",
     "derive_connection_status",
-    "derive_docsis_status",
+    "enrich_docsis_status",
     "ActionResult",
     "execute_action",
     "execute_hnap_action",

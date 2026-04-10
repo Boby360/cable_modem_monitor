@@ -206,6 +206,14 @@ including `system_info`, coordinator state, `lock_status` on channels,
 full `core_diagnostics` (auth strategy, resource fetches, timestamps),
 and raw numeric precision — must be preserved verbatim.
 
+**Key structure:** The diagnostics output disassembles Core's nested
+`modem_data` dict into separate top-level keys. `modem_data` contains
+orchestrator-derived evaluated state (connection + health).
+`system_info` is the full pass-through of Core's parser-extracted and
+computed fields (counts, totals, version, uptime). The diagnostics
+builder never copies values from `system_info` into `modem_data`. See
+HA_ADAPTER_SPEC § Diagnostics Top-Level Keys for the full schema.
+
 **Stripped sections** (not modem data):
 
 - `home_assistant` — host environment

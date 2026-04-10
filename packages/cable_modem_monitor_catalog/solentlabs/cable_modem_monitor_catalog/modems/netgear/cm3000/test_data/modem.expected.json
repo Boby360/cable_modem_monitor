@@ -370,6 +370,7 @@
     }
   ],
   "system_info": {
+    "docsis_status": "Operational",
     "current_time": "Wed Mar 25 05:58:01 2026",
     "downstream_channel_count": 34,
     "hardware_version": "1.01",
