@@ -30,6 +30,11 @@ notes: |
   and /cgi-bin/vers_cgi (firmware/hardware version). Version info
   parsed from the "System:" blob via parser.yaml label/pattern rules.
 
+# TODO: New HAR capture needed for provisioned speed
+# CM3500B (same CGI family) has /cgi-bin/config_params_cgi with
+# SfMaxTrafficRate service flow values. Current capture does not
+# include that endpoint. Re-capture to confirm TM1602A exposes it too.
+
 references:
   issues:
     - "[#112 — [Modem Request] Arris TM1602A](https://github.com/solentlabs/cable_modem_monitor/issues/112)"

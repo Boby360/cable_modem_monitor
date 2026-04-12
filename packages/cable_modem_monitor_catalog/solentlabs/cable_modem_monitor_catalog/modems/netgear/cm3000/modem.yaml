@@ -40,6 +40,11 @@ notes: |
   Login page at /, POST to /goform/Login with loginName/loginPassword.
   md5.js loaded on login page but password sent plaintext.
 
+# TODO: New HAR capture needed for provisioned speed
+# Same XHR pattern as CM2000/CM2050V — InitProvRateTableUpdateView()
+# exists but InitProvRateTableTagValue() data loads via XHR not in
+# current capture. Re-capture with har-capture 0.5.1+ (XHR quiescence).
+
 references:
   issues:
     - "[#127 — [Modem Request] Netgear CM3000](https://github.com/solentlabs/cable_modem_monitor/issues/127)"

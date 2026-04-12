@@ -37,6 +37,12 @@ notes: |
   extra cells are subcarrier indices not present in the header.
   parser.py computes center frequency from first/last subcarrier frequencies.
 
+# TODO: New HAR capture needed for provisioned speed
+# The archive HAR has /cgi-bin/config_params_cgi with SfMaxTrafficRate
+# service flow values (provisioned speed in bps). The current test HAR
+# only captures status_cgi. Re-capture with config_params_cgi included
+# to add provisioned_speed_down / provisioned_speed_up to parser.yaml.
+
 references:
   issues:
     - "[#73 — [Modem Request] Arris CM3500B](https://github.com/solentlabs/cable_modem_monitor/issues/73)"

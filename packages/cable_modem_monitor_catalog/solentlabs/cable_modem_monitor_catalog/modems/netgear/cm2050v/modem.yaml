@@ -36,6 +36,11 @@ notes: |
   XSRF_TOKEN cookie set on first GET, sent with all subsequent requests.
   Login page at /, POST to /goform/Login.
 
+# TODO: New HAR capture needed for provisioned speed
+# Same XHR pattern as CM2000 — InitProvRateTableUpdateView() exists but
+# InitProvRateTableTagValue() data loads via XHR not in current capture.
+# Re-capture with har-capture 0.5.1+ (XHR quiescence).
+
 references:
   issues:
     - "[#105 — [Modem Request] Netgear CM2050V](https://github.com/solentlabs/cable_modem_monitor/issues/105)"
