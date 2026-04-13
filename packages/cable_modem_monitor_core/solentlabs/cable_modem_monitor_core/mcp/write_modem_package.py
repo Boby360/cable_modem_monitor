@@ -21,6 +21,8 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..validation.parser_sandbox import validate_parser_sandbox
+
 
 @dataclass
 class WriteResult:
@@ -30,11 +32,13 @@ class WriteResult:
         modem_dir: Path written to (for ``run_tests``).
         files_written: Files created or updated.
         files_skipped: Files that already existed (not overwritten).
+        errors: Error messages (e.g., sandbox violations).
     """
 
     modem_dir: str = ""
     files_written: list[str] = field(default_factory=list)
     files_skipped: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         """Serialize to a plain dict for MCP tool output."""
@@ -42,6 +46,7 @@ class WriteResult:
             "modem_dir": self.modem_dir,
             "files_written": self.files_written,
             "files_skipped": self.files_skipped,
+            "errors": self.errors,
         }
 
 
@@ -91,6 +96,12 @@ def write_modem_package(
         ``WriteResult`` with paths written and skipped.
     """
     result = WriteResult()
+
+    # Sandbox check — parser.py must be a "pure parser"
+    if parser_py is not None and (violations := validate_parser_sandbox(parser_py)):
+        result.errors = [f"parser.py: {v}" for v in violations]
+        return result
+
     out = Path(output_dir)
     test_data = out / "test_data"
 

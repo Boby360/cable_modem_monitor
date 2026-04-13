@@ -469,8 +469,9 @@ values, filter channels, or fully replace the extraction output.
 4. **Sandbox Rules (Enforcement):** parser.py must be a "Pure Parser." To
    ensure stability and security, it is subject to the following
    constraints:
-   - **Allowed Imports:** Only `math`, `re`, `json`, `datetime`, `bs4`,
-     and `typing` are permitted.
+   - **Allowed Imports:** Only `__future__`, `math`, `re`, `json`,
+     `datetime`, `bs4`, `typing`, `collections`, `functools`, and
+     `itertools` are permitted.
    - **No I/O:** No filesystem (`os`, `pathlib`), network (`requests`,
      `urllib`), or process (`subprocess`) calls allowed.
    - **No Side Effects:** Hooks must not modify the `resources` dict or

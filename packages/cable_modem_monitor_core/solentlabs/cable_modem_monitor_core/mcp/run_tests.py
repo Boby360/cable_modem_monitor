@@ -15,6 +15,7 @@ from typing import Any
 
 from ..test_harness.discovery import discover_modem_tests
 from ..test_harness.runner import TestResult, run_modem_test
+from ..validation.parser_sandbox import validate_parser_sandbox
 
 
 @dataclass
@@ -59,6 +60,19 @@ def run_tests(modem_dir: str) -> RunTestsResult:
         return RunTestsResult(
             passed=False,
             errors=[f"Directory not found: {modem_dir}"],
+        )
+
+    # Sandbox check — parser.py must be a "pure parser"
+    sandbox_errors: list[str] = []
+    for p_py in path.rglob("parser.py"):
+        violations = validate_parser_sandbox(p_py.read_text(encoding="utf-8"))
+        for v in violations:
+            sandbox_errors.append(f"{p_py.relative_to(path)}: {v}")
+
+    if sandbox_errors:
+        return RunTestsResult(
+            passed=False,
+            errors=sandbox_errors,
         )
 
     cases = discover_modem_tests(path)
