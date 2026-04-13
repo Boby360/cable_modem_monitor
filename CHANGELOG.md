@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-alpha.15] - 2026-04-12
+
+### Added
+
+- **Form-nonce base64 credential encoding** — auto-detect firmware that
+  packs credentials as base64 into a hidden form field (SB6190 9.1.x).
+  Encoding type discovered at setup time and stored in config entry.
+  Related to #83, #93.
+- **JS endpoint discovery in MCP intake** — scan HAR JavaScript content
+  (standalone `.js` files + inline `<script>` blocks) for AJAX/fetch
+  targets and diff against captured URLs. Uncaptured endpoints surface
+  as advisory warnings during `analyze_har()`. Related to #86.
+- **AST sandbox validator for parser.py** — enforces pure-parser
+  principle via static analysis at `run_tests` and `write_modem_package`
+  gates. Only safe stdlib + bs4/typing allowed; forbidden builtins
+  (`eval`/`exec`/`open`) and relative imports rejected.
+
+### Fixed
+
+- **S33v2 confirmed** — verified on real hardware via alpha.14
+  diagnostics. Rebuilt all `modem.verified.json` files from original
+  GitHub diagnostics to preserve full modem data verbatim. Related
+  to #117.
+- **CGA2121 missing form field** — added `hidden_fields.language_selector`
+  to CGA2121 modem.yaml (browser sends it during login but it was
+  missing from config). Related to #96.
+- **Provisioned speed direction swap** — DOCSIS service flow direction
+  was reversed in CH7465MT (direction 1=downstream, 2=upstream per
+  MULPI spec). Provisioned speed fields now store raw bps at Core
+  level; HA sensor layer declares `DATA_RATE` device class for
+  automatic Mbit/s display. Related to #129.
+- **SJCL session validation empty body** — session finalization POST
+  used `post_json()` which requires a JSON dict, but TG3442DE returns
+  HTTP 200 with empty body (valid success). Replaced with plain POST.
+  Related to #86.
+- **DM1000 response encoding mismatch** — mock server now decodes
+  HAR `content.encoding: base64` per HAR 1.2 spec. Without this,
+  modems whose HAR uses base64 storage were served raw base64 text.
+  Related to #92.
+- **Log message quality — soak findings** — session label
+  "none" → "new" on first poll; collector drops error text from
+  connectivity logs; HA adapter logs poll-failure alongside
+  coordinator success; coordinator name includes model + IP.
+
+### Changed
+
+- **Single-source system_info** — `modem_data` diagnostics summary
+  reduced to evaluated connection + health state (6 fields);
+  `system_info` is now the single source for all modem metadata.
+  `docsis_status` enriched into `system_info` (not derived in
+  parallel). Related to #117.
+- **Self-describing auth strategies + Core orchestrator factory** —
+  auth models carry `display_name` and `transport` ClassVars on
+  shared `AuthStrategyBase`. Component assembly moved from HA adapter
+  to Core factory (`create_collector`, `create_orchestrator`).
+  Adding a new auth strategy is three additive files, zero
+  modifications to existing code.
+- **Parser sandbox rules and contribution docs** — PARSING_SPEC,
+  ONBOARDING_SPEC, SYSTEM_INFO_SPEC, MODEM_DIRECTORY_SPEC updated
+  with sandbox constraints, sanitization checks, and docsis_status
+  pass-through semantics.
+
 ## [3.14.0-alpha.14] - 2026-04-09
 
 ### Added
