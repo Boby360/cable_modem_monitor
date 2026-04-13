@@ -28,7 +28,7 @@ hardware:
   docsis_version: "3.0"
   release_date: "2015"
 
-status: awaiting_verification
+status: confirmed
 
 sources:
   auth_config: "[PR #129 — CH7465MT HAR captures](https://github.com/solentlabs/cable_modem_monitor/pull/129)"
