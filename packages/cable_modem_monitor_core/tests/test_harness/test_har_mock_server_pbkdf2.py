@@ -61,6 +61,51 @@ def _derive_key(password: str, salt: str, iterations: int, key_length_bits: int)
 # ---------------------------------------------------------------------------
 
 
+class TestExtractField:
+    """FormPbkdf2AuthHandler._extract_field body parsing.
+
+    The handler accepts both JSON and form-encoded POST bodies.
+    """
+
+    # ┌────────────────────────────────────────────────┬────────────┬────────────────┬─────────────────────┐
+    # │ body                                           │ field      │ expected       │ description         │
+    # ├────────────────────────────────────────────────┼────────────┼────────────────┼─────────────────────┤
+    # │ b'{"password": "seeksalthash"}'                │ "password" │ "seeksalthash" │ JSON body           │
+    # │ b'password=seeksalthash&username=admin'        │ "password" │ "seeksalthash" │ form-encoded body   │
+    # │ b'{"username": "admin"}'                       │ "password" │ ""             │ JSON missing field  │
+    # │ b'username=admin'                              │ "password" │ ""             │ form missing field  │
+    # │ b'\xff\xfe'                                    │ "password" │ ""             │ invalid bytes       │
+    # │ b''                                            │ "password" │ ""             │ empty body          │
+    # └────────────────────────────────────────────────┴────────────┴────────────────┴─────────────────────┘
+    #
+    # fmt: off
+    EXTRACT_CASES = [
+        (b'{"password": "seeksalthash"}',          "password", "seeksalthash", "JSON body"),
+        (b'password=seeksalthash&username=admin',   "password", "seeksalthash", "form-encoded body"),
+        (b'{"username": "admin"}',                  "password", "",             "JSON missing field"),
+        (b'username=admin',                         "password", "",             "form missing field"),
+        (b'\xff\xfe',                               "password", "",             "invalid bytes"),
+        (b'',                                       "password", "",             "empty body"),
+    ]
+    # fmt: on
+
+    @pytest.mark.parametrize(
+        "body,field,expected,desc",
+        EXTRACT_CASES,
+        ids=[c[3] for c in EXTRACT_CASES],
+    )
+    def test_extract_field(
+        self,
+        body: bytes,
+        field: str,
+        expected: str,
+        desc: str,
+    ) -> None:
+        """Extracts field from body or returns empty string."""
+        result = FormPbkdf2AuthHandler._extract_field(body, field)
+        assert result == expected
+
+
 class TestFormPbkdf2AuthHandler:
     """Unit tests for PBKDF2 auth handler phases."""
 

@@ -12,6 +12,7 @@ import requests
 from solentlabs.cable_modem_monitor_core.auth.base import AuthResult
 from solentlabs.cable_modem_monitor_core.auth.response import (
     parse_json_dict,
+    post_form,
     post_json,
     safe_preview,
 )
@@ -223,23 +224,40 @@ class TestParseJsonDict:
         assert "not valid json" in result.error.lower()
 
 
-# ── post_json ────────────────────────────────────────────────
+# ── post_json / post_form ────────────────────────────────────
+
+# Both helpers share the same POST→parse contract. Parametrize
+# over both to avoid duplicated tests.
+
+# fmt: off
+_POST_FUNCTIONS = [
+    pytest.param(post_json, id="post_json"),
+    pytest.param(post_form, id="post_form"),
+]
+# fmt: on
 
 
-class TestPostJson:
-    """post_json() POST + parse."""
+class TestPostHelpers:
+    """post_json() and post_form() — shared POST + parse contract."""
 
-    def test_success_returns_tuple(self, session: requests.Session) -> None:
+    @pytest.mark.parametrize("post_fn", _POST_FUNCTIONS)
+    def test_success_returns_tuple(
+        self,
+        session: requests.Session,
+        post_fn: Any,
+    ) -> None:
         """Dict response returns (response, data) tuple."""
         resp = _mock_response(json_value={"ok": True}, text='{"ok": true}')
         with patch.object(session, "post", return_value=resp):
-            result = post_json(session, "http://modem/api", {}, 10)
+            result = post_fn(session, "http://modem/api", {}, 10)
         assert isinstance(result, tuple)
         assert result[1] == {"ok": True}
 
+    @pytest.mark.parametrize("post_fn", _POST_FUNCTIONS)
     def test_connection_error_propagates(
         self,
         session: requests.Session,
+        post_fn: Any,
     ) -> None:
         """ConnectionError propagates for collector."""
         with (
@@ -250,9 +268,14 @@ class TestPostJson:
             ),
             pytest.raises(requests.ConnectionError),
         ):
-            post_json(session, "http://modem/api", {}, 10)
+            post_fn(session, "http://modem/api", {}, 10)
 
-    def test_timeout_propagates(self, session: requests.Session) -> None:
+    @pytest.mark.parametrize("post_fn", _POST_FUNCTIONS)
+    def test_timeout_propagates(
+        self,
+        session: requests.Session,
+        post_fn: Any,
+    ) -> None:
         """Timeout propagates for collector."""
         with (
             patch.object(
@@ -262,66 +285,93 @@ class TestPostJson:
             ),
             pytest.raises(requests.Timeout),
         ):
-            post_json(session, "http://modem/api", {}, 10)
+            post_fn(session, "http://modem/api", {}, 10)
 
-    def test_other_request_error(self, session: requests.Session) -> None:
+    @pytest.mark.parametrize("post_fn", _POST_FUNCTIONS)
+    def test_other_request_error(
+        self,
+        session: requests.Session,
+        post_fn: Any,
+    ) -> None:
         """Non-connectivity RequestException returns AuthResult."""
         with patch.object(
             session,
             "post",
             side_effect=requests.RequestException("other"),
         ):
-            result = post_json(session, "http://modem/api", {}, 10)
+            result = post_fn(session, "http://modem/api", {}, 10)
         assert isinstance(result, AuthResult)
         assert result.success is False
         assert "POST failed" in result.error
 
-    def test_not_json_error(self, session: requests.Session) -> None:
+    @pytest.mark.parametrize("post_fn", _POST_FUNCTIONS)
+    def test_not_json_error(
+        self,
+        session: requests.Session,
+        post_fn: Any,
+    ) -> None:
         """Non-JSON response returns error with body preview."""
         resp = _mock_response(
             json_error=True,
             text="<html>Login Required</html>",
         )
         with patch.object(session, "post", return_value=resp):
-            result = post_json(session, "http://modem/api", {}, 10)
+            result = post_fn(session, "http://modem/api", {}, 10)
         assert isinstance(result, AuthResult)
         assert "not valid json" in result.error.lower()
         assert "Login Required" in result.error
 
-    def test_non_dict_error(self, session: requests.Session) -> None:
+    @pytest.mark.parametrize("post_fn", _POST_FUNCTIONS)
+    def test_non_dict_error(
+        self,
+        session: requests.Session,
+        post_fn: Any,
+    ) -> None:
         """Non-dict JSON returns error with type and preview."""
         resp = _mock_response(
             json_value="NOSESSION",
             text='"NOSESSION"',
         )
         with patch.object(session, "post", return_value=resp):
-            result = post_json(session, "http://modem/api", {}, 10)
+            result = post_fn(session, "http://modem/api", {}, 10)
         assert isinstance(result, AuthResult)
         assert "expected json object" in result.error.lower()
         assert "NOSESSION" in result.error
 
-    def test_long_preview_truncated(self, session: requests.Session) -> None:
+    @pytest.mark.parametrize("post_fn", _POST_FUNCTIONS)
+    def test_long_preview_truncated(
+        self,
+        session: requests.Session,
+        post_fn: Any,
+    ) -> None:
         """Long non-dict value is truncated in error."""
         resp = _mock_response(json_value=_LONG_STRING, text=_LONG_STRING)
         with patch.object(session, "post", return_value=resp):
-            result = post_json(session, "http://modem/api", {}, 10)
+            result = post_fn(session, "http://modem/api", {}, 10)
         assert isinstance(result, AuthResult)
         assert len(result.error) < 400
         assert "..." in result.error
 
-    def test_double_encoded_json(self, session: requests.Session) -> None:
+    @pytest.mark.parametrize("post_fn", _POST_FUNCTIONS)
+    def test_double_encoded_json(
+        self,
+        session: requests.Session,
+        post_fn: Any,
+    ) -> None:
         """Double-encoded JSON string wrapping a dict is unwrapped."""
         inner = json.dumps({"p_status": "AdminMatch"})
         resp = _mock_response(json_value=inner, text=json.dumps(inner))
         with patch.object(session, "post", return_value=resp):
-            result = post_json(session, "http://modem/api", {}, 10)
+            result = post_fn(session, "http://modem/api", {}, 10)
         assert isinstance(result, tuple)
         assert result[1] == {"p_status": "AdminMatch"}
 
+    @pytest.mark.parametrize("post_fn", _POST_FUNCTIONS)
     def test_default_context_includes_url(
         self,
         session: requests.Session,
         caplog: pytest.LogCaptureFixture,
+        post_fn: Any,
     ) -> None:
         """Default context label includes the POST URL."""
         resp = _mock_response(json_value={"ok": True}, text='{"ok": true}')
@@ -332,6 +382,6 @@ class TestPostJson:
             ),
             patch.object(session, "post", return_value=resp),
         ):
-            post_json(session, "http://modem/api", {}, 10)
+            post_fn(session, "http://modem/api", {}, 10)
 
         assert any("POST http://modem/api" in r.message for r in caplog.records)

@@ -5,7 +5,7 @@ error reporting across auth strategies.  Strategy-specific
 validation (``p_status``, error fields, ``LoginResult``, etc.)
 stays in each strategy module.
 
-Three entry points:
+Four entry points:
 
 * :func:`safe_preview` — truncate arbitrary values for error
   messages and logs.
@@ -13,6 +13,9 @@ Three entry points:
   JSON dict (with double-decode, type check, DEBUG log).
 * :func:`post_json` — POST JSON payload **and** parse the
   response (combines the POST with :func:`parse_json_dict`).
+* :func:`post_form` — POST form-encoded payload **and** parse
+  the JSON response (like :func:`post_json` but sends
+  ``application/x-www-form-urlencoded``).
 """
 
 from __future__ import annotations
@@ -123,6 +126,46 @@ def post_json(
     """
     try:
         resp = session.post(url, json=payload, timeout=timeout)
+    except requests.RequestException as e:
+        if isinstance(e, requests.ConnectionError | requests.Timeout):
+            raise
+        return AuthResult(success=False, error=f"POST failed: {e}")
+
+    result = parse_json_dict(resp, context=context or f"POST {url}")
+    if isinstance(result, AuthResult):
+        return result
+    return resp, result
+
+
+def post_form(
+    session: requests.Session,
+    url: str,
+    payload: dict[str, Any],
+    timeout: int,
+    *,
+    context: str = "",
+) -> tuple[requests.Response, dict[str, Any]] | AuthResult:
+    """POST form-encoded data and return ``(response, parsed_dict)``.
+
+    Like :func:`post_json` but sends
+    ``application/x-www-form-urlencoded`` (``data=``) instead of
+    ``application/json`` (``json=``).  The response is still parsed
+    as JSON via :func:`parse_json_dict`.
+
+    Args:
+        session: ``requests.Session`` to use.
+        url: Target URL.
+        payload: Form fields to POST.
+        timeout: Request timeout in seconds.
+        context: Label for log/error messages.  Defaults to
+            ``"POST {url}"``.
+
+    Returns:
+        ``(response, parsed_dict)`` on success, or ``AuthResult``
+        on failure.
+    """
+    try:
+        resp = session.post(url, data=payload, timeout=timeout)
     except requests.RequestException as e:
         if isinstance(e, requests.ConnectionError | requests.Timeout):
             raise

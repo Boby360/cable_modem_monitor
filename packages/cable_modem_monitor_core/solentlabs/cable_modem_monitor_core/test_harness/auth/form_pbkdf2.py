@@ -15,6 +15,7 @@ import hashlib
 import json
 import logging
 from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs
 
 from ..routes import RouteEntry, normalize_path
 from .base import extract_action_config
@@ -135,22 +136,38 @@ class FormPbkdf2AuthHandler(FormAuthHandler):
         )
 
     def _is_salt_request(self, body: bytes) -> bool:
-        """Check if the POST body is a salt trigger request."""
-        try:
-            data = json.loads(body)
-            return str(data.get("password", "")) == self._salt_trigger
-        except (json.JSONDecodeError, AttributeError):
-            return self._salt_trigger.encode("utf-8") in body
+        """Check if the POST body is a salt trigger request.
+
+        Accepts both form-encoded (``password=seeksalthash``) and
+        JSON (``{"password": "seeksalthash"}``) bodies.
+        """
+        password = self._extract_field(body, "password")
+        return password == self._salt_trigger
 
     def _validate_login(self, body: bytes) -> bool:
-        """Validate the derived PBKDF2 hash in the login POST body."""
+        """Validate the derived PBKDF2 hash in the login POST body.
+
+        Accepts both form-encoded and JSON bodies.
+        """
+        submitted = self._extract_field(body, "password")
+        return submitted == self._expected_derived
+
+    @staticmethod
+    def _extract_field(body: bytes, field: str) -> str:
+        """Extract a field value from a form-encoded or JSON body."""
+        # Try JSON first
         try:
             data = json.loads(body)
-            submitted = str(data.get("password", ""))
+            return str(data.get(field, ""))
         except (json.JSONDecodeError, AttributeError):
-            return False
-
-        return submitted == self._expected_derived
+            pass
+        # Fall back to form-encoded
+        try:
+            parsed = parse_qs(body.decode("utf-8"))
+            values = parsed.get(field, [])
+            return values[0] if values else ""
+        except (UnicodeDecodeError, ValueError):
+            return ""
 
     def _compute_expected_key(self) -> str:
         """Pre-compute the expected derived key from the test password."""

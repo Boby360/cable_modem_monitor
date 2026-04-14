@@ -12,7 +12,7 @@ import requests
 
 from ..models.modem_config.auth import FormPbkdf2Auth
 from .base import AuthResult, BaseAuthManager
-from .response import parse_json_dict, post_json
+from .response import parse_json_dict, post_form
 
 _logger = logging.getLogger(__name__)
 
@@ -156,7 +156,7 @@ def _request_salts(
     Returns AuthResult on failure, dict on success.
     """
     salt_data = {"username": username, "password": salt_trigger}
-    result = post_json(
+    result = post_form(
         session,
         login_url,
         salt_data,
@@ -186,7 +186,7 @@ def _submit_login(
     """
     login_data = {"username": username, "password": derived_key}
     try:
-        response = session.post(login_url, json=login_data, timeout=timeout)
+        response = session.post(login_url, data=login_data, timeout=timeout)
     except requests.RequestException as e:
         if isinstance(e, requests.ConnectionError | requests.Timeout):
             raise

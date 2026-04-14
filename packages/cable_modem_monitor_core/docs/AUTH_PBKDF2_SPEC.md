@@ -2,7 +2,7 @@
 
 ## Overview
 
-Multi-round-trip PBKDF2 challenge-response. Client requests server-provided salts, derives a key via PBKDF2-HMAC-SHA256, and submits the derived hash. Optionally double-hashes with a second salt. No encryption of the payload -- the derived hash is sent as plaintext hex in JSON. No external crypto dependencies (uses Python's `hashlib`).
+Multi-round-trip PBKDF2 challenge-response. Client requests server-provided salts, derives a key via PBKDF2-HMAC-SHA256, and submits the derived hash. Optionally double-hashes with a second salt. No encryption of the payload -- the derived hash is sent as plaintext hex in a form-encoded POST. No external crypto dependencies (uses Python's `hashlib`).
 
 ## Crypto Library
 
@@ -15,7 +15,7 @@ These modems use the SJCL JavaScript library for PBKDF2 computation, but unlike 
 - **Salt**: Plain string from JSON response. UTF-8 encoded for PBKDF2. The modem's `login.js` passes the salt string directly to `sjcl.misc.pbkdf2()` which internally converts strings via `sjcl.codec.utf8String.toBits()`. This is NOT hex-decoded -- contrast with `form_sjcl` where the wrapper explicitly calls `sjcl.codec.hex.toBits(salt)`.
 - **Password**: UTF-8 encoded for first PBKDF2 round. For double-hash, the hex output of the first round is UTF-8 encoded as the "password" for the second round.
 - **Key derivation**: PBKDF2-HMAC-SHA256 (RFC 8018). Output is hex-encoded and sent as plaintext.
-- **No encryption**: The derived hash is sent in a plain JSON POST. The security relies on the hash being non-reversible, not on transport encryption.
+- **No encryption**: The derived hash is sent in a plaintext form-encoded POST. The security relies on the hash being non-reversible, not on transport encryption.
 
 ## Auth Flow
 
@@ -26,8 +26,9 @@ These modems use the SJCL JavaScript library for PBKDF2 computation, but unlike 
    or from response header (csrf_header name)
    Set on session: session.headers[csrf_header] = token
 
-2. Request server salts:
-   POST login_endpoint {"username": "<user>", "password": "<salt_trigger>"}
+2. Request server salts (form-encoded):
+   POST login_endpoint  username=<user>&password=<salt_trigger>
+   Content-Type: application/x-www-form-urlencoded
    Response: {"salt": "<salt_string>", "saltwebui": "<saltwebui_string>"}
    Salt values are plain strings, NOT hex-encoded.
 
@@ -40,8 +41,9 @@ These modems use the SJCL JavaScript library for PBKDF2 computation, but unlike 
    Output: hex string
    If saltwebui missing from response, falls back to salt.
 
-5. POST login:
-   POST login_endpoint {"username": "<user>", "password": "<derived_hex>"}
+5. POST login (form-encoded):
+   POST login_endpoint  username=<user>&password=<derived_hex>
+   Content-Type: application/x-www-form-urlencoded
    Success: HTTP != 401 AND no "error" key in JSON response
    Sets PHPSESSID cookie
 
@@ -61,7 +63,7 @@ What's hardcoded in `auth/form_pbkdf2.py` that is specific to the Technicolor RE
 | Salt trigger value | default `"seeksalthash"` | Technicolor login.js | Other firmware may use different trigger |
 | Success criteria | HTTP != 401 AND no `"error"` key | HAR response analysis | Other APIs may signal failure differently |
 | Error detail field | `"message"` key in error response | HAR response analysis | Firmware-specific |
-| JSON POST format | `application/json` | HAR request headers | Some firmware may use form-encoded |
+| Form-encoded POST | `application/x-www-form-urlencoded` | HAR request headers, login.js jQuery `$.ajax({data})` | All known Technicolor REST modems use form-encoded |
 | Same endpoint for salt and login | Single `login_endpoint` for both rounds | Technicolor API design | Other designs may separate these |
 
 ## Config Reference

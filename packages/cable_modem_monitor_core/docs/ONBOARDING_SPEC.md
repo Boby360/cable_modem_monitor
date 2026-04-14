@@ -227,7 +227,7 @@ Check the **first request** in the HAR:
 | `HNAP_AUTH` header on any request | `hnap` auth |
 | URL contains base64-encoded credentials | `url_token` auth |
 | JSON POST with SJCL AES-CCM encrypted payload (`EncryptData`) | `form_sjcl` auth |
-| JSON POST with salt/PBKDF2 flow | `form_pbkdf2` auth |
+| Form-encoded POST with salt/PBKDF2 flow | `form_pbkdf2` auth |
 | No auth headers, no login, immediate 200 with data | `none` auth |
 
 **Common mistake — 401 does not mean Basic Auth.** Many modems return

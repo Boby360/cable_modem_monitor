@@ -93,6 +93,18 @@ class TestFetchCsrfToken:
                 1,
             )
 
+    def test_non_connection_error_returns_empty(self) -> None:
+        """Non-connectivity RequestException returns empty token."""
+        session = requests.Session()
+        with patch.object(session, "get", side_effect=requests.RequestException("other")):
+            token = _fetch_csrf_token(
+                session,
+                "http://192.168.100.1/api/init",
+                "X-CSRF-TOKEN",
+                10,
+            )
+            assert token == ""
+
     def test_non_json_no_header(self) -> None:
         """Returns empty string when no token found."""
         entries, _ = load_auth_fixture("har_csrf_no_token.json")
@@ -378,3 +390,21 @@ class TestFormPbkdf2AuthManager:
             ]
 
             manager.authenticate(session, "http://192.168.100.1", "admin", "password")
+
+    def test_login_post_non_connection_error(self, session: requests.Session) -> None:
+        """Non-connectivity RequestException on login POST returns AuthResult."""
+        config = self._make_config(double_hash=False)
+        manager = FormPbkdf2AuthManager(config)
+        manager.configure_session(session, {})
+
+        with patch.object(session, "post") as mock_post:
+            salt_resp = MagicMock()
+            salt_resp.json.return_value = {"salt": "s"}
+            mock_post.side_effect = [
+                salt_resp,
+                requests.RequestException("too many redirects"),
+            ]
+
+            result = manager.authenticate(session, "http://192.168.100.1", "admin", "password")
+            assert result.success is False
+            assert "Login POST failed" in result.error
