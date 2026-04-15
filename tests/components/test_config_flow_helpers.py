@@ -100,33 +100,35 @@ def _setup_modem_dir(tmp_path: Path) -> Path:
 # Pure-function helpers — format_variant_label
 # =====================================================================
 
-# ┌───────────────┬──────────────┬──────────────────────────────────────┬──────────────────────┐
-# │ auth_strategy │ isps         │ expected                             │ description          │
-# ├───────────────┼──────────────┼──────────────────────────────────────┼──────────────────────┤
-# │ "none"        │ []           │ "No Authentication"                  │ no_auth_no_isps      │
-# │ "basic"       │ ["ISP-A"]    │ "Basic Authentication (ISP-A)"       │ basic_one_isp        │
-# │ "form_nonce"  │ ["A", "B"]   │ "Form Login (Nonce) (A, B)"          │ nonce_multi_isp      │
-# │ "unknown_x"   │ []           │ "unknown_x"                          │ unlisted_strategy    │
-# └───────────────┴──────────────┴──────────────────────────────────────┴──────────────────────┘
+# ┌───────────────┬──────────┬──────────────────────────────────────┬──────────────────────┐
+# │ auth_strategy │ name     │ expected                             │ description          │
+# ├───────────────┼──────────┼──────────────────────────────────────┼──────────────────────┤
+# │ "none"        │ None     │ "No Authentication"                  │ default_no_auth      │
+# │ "basic"       │ None     │ "Basic Authentication"               │ default_basic        │
+# │ "form_nonce"  │ None     │ "Form Login (Nonce)"                 │ default_nonce        │
+# │ "url_token"   │ "v7"     │ "URL Token — v7"                     │ named_variant        │
+# │ "unknown_x"   │ None     │ "unknown_x"                          │ unlisted_strategy    │
+# └───────────────┴──────────┴──────────────────────────────────────┴──────────────────────┘
 #
 # fmt: off
 VARIANT_LABEL_CASES = [
-    ("none",       [],           "No Authentication",             "no_auth_no_isps"),
-    ("basic",      ["ISP-A"],    "Basic Authentication (ISP-A)",  "basic_one_isp"),
-    ("form_nonce", ["A", "B"],   "Form Login (Nonce) (A, B)",     "nonce_multi_isp"),
-    ("unknown_x",  [],           "unknown_x",                     "unlisted_strategy"),
+    ("none",       None,  "No Authentication",       "default_no_auth"),
+    ("basic",      None,  "Basic Authentication",    "default_basic"),
+    ("form_nonce", None,  "Form Login (Nonce)",      "default_nonce"),
+    ("url_token",  "v7",  "URL Token — v7",          "named_variant"),
+    ("unknown_x",  None,  "unknown_x",               "unlisted_strategy"),
 ]
 # fmt: on
 
 
 @pytest.mark.parametrize(
-    "auth_strategy,isps,expected,desc",
+    "auth_strategy,name,expected,desc",
     VARIANT_LABEL_CASES,
     ids=[c[3] for c in VARIANT_LABEL_CASES],
 )
-def test_format_variant_label(auth_strategy, isps, expected, desc):
-    """format_variant_label builds correct label from strategy + ISPs."""
-    variant = VariantInfo(name=None, auth_strategy=auth_strategy, isps=isps)
+def test_format_variant_label(auth_strategy, name, expected, desc):
+    """format_variant_label builds correct label from strategy + variant name."""
+    variant = VariantInfo(name=name, auth_strategy=auth_strategy, isps=[])
     assert format_variant_label(variant) == expected
 
 

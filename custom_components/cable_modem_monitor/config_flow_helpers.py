@@ -62,20 +62,22 @@ AUTH_STRATEGY_LABELS: dict[str, str] = get_strategy_display_labels()
 def format_variant_label(variant: VariantInfo) -> str:
     """Build a human-readable label for a variant dropdown entry.
 
-    Format: ``{auth label}`` or ``{auth label} ({ISPs})``.
+    Format: ``{auth label}`` for default variants,
+    ``{auth label} — {variant name}`` for named variants.
 
     Examples::
 
         "No Authentication"
-        "Basic Authentication (Comcast, Spectrum)"
+        "URL Token"
+        "URL Token — v7"
         "Form Login (Nonce)"
 
     Args:
         variant: Variant info from the catalog manager.
     """
     label = AUTH_STRATEGY_LABELS.get(variant.auth_strategy, variant.auth_strategy)
-    if variant.isps:
-        return f"{label} ({', '.join(variant.isps)})"
+    if variant.name:
+        return f"{label} — {variant.name}"
     return label
 
 
