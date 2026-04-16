@@ -815,6 +815,28 @@ def test_generate_dashboard_handler(
     assert "sensor.cable_modem_us_atdma_ch_1_power" in yaml
     assert "sensor.cable_modem_total_corrected_errors" in yaml
     assert "sensor.cable_modem_http_latency" in yaml
+    assert "entity: button.cable_modem_restart_modem" in yaml
+
+
+def test_generate_dashboard_handler_no_restart_support(
+    mock_runtime_data: CableModemRuntimeData,
+) -> None:
+    """Dashboard omits the restart button when the orchestrator reports no restart support."""
+    mock_runtime_data.orchestrator.supports_restart = False  # type: ignore[misc]
+
+    entry = _make_mock_entry(mock_runtime_data)
+    entry.data = {"entity_prefix": "none", "host": "192.168.100.1"}
+
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [entry]
+
+    handler = create_generate_dashboard_handler(hass)
+    call = MagicMock()
+    call.data = {}
+
+    yaml = handler(call)["yaml"]
+    assert "button.cable_modem_restart_modem" not in yaml
+    assert "This will restart your modem" not in yaml
 
 
 def test_generate_dashboard_no_entry() -> None:
