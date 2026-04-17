@@ -20,12 +20,14 @@ class ParserStatus(StrEnum):
 |--------|---------|------------|
 | **IN_PROGRESS** | Parser actively being developed (feature branch/WIP PR) | Complete development |
 | **AWAITING_VERIFICATION** | Parser released but awaiting first user confirmation | Needs community testing |
-| **VERIFIED** | User with real modem confirmed parser works correctly | Stable for use |
+| **CONFIRMED** | User with real modem confirmed parser works correctly | Stable for use |
 | **UNSUPPORTED** | Modem locked down or no exposed status pages, kept for documentation | Awaiting user data |
 
 ### Using Status in Parsers
 
-Status is declared in each modem's `modem.yaml` under `status`.
+Status is declared in each modem's `modem.yaml` under `status`. Promotion
+from `awaiting_verification` to `confirmed` follows the ingest procedure
+in [MODEM_DIRECTORY_SPEC.md](MODEM_DIRECTORY_SPEC.md#verification-artifact).
 
 ---
 

@@ -22,6 +22,9 @@ from pathlib import Path
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from solentlabs.cable_modem_monitor_core.models.field_registry import (
+    canonicalize_channel_keys,
+)
 
 from .const import (
     CONF_CHANNEL_IDENTITY,
@@ -355,12 +358,13 @@ def _build_diagnostics_dict(
     if modem_data:
         diagnostics["system_info"] = system_info
 
-    # Channel dump — pass through parser output as-is.  Parsers emit
-    # sparse dicts (only fields the modem produces), already validated
-    # against field_registry by validate_modem_data.
+    # Channel dump — parsers emit sparse dicts (only fields the modem
+    # produces), already validated against field_registry by
+    # validate_modem_data. Keys normalized to canonical order for
+    # readability; see FIELD_REGISTRY § Canonical channel key order.
     if modem_data:
-        diagnostics["downstream_channels"] = modem_data.get("downstream", [])
-        diagnostics["upstream_channels"] = modem_data.get("upstream", [])
+        diagnostics["downstream_channels"] = [canonicalize_channel_keys(ch) for ch in modem_data.get("downstream", [])]
+        diagnostics["upstream_channels"] = [canonicalize_channel_keys(ch) for ch in modem_data.get("upstream", [])]
     else:
         diagnostics["downstream_channels"] = []
         diagnostics["upstream_channels"] = []

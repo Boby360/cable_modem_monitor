@@ -17,7 +17,7 @@ hardware:
   docsis_version: "3.1"
   chipset: "Broadcom BCM3390"
 
-status: awaiting_verification
+status: confirmed
 
 sources:
   auth_config: "[#105 Netgear CM2050V](https://github.com/solentlabs/cable_modem_monitor/issues/105)"

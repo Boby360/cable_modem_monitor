@@ -347,7 +347,11 @@ Labels should reflect actionable state:
 
 - `in-development` - Code actively being written or in unreleased branch
 - `needs-testing` - Released and awaiting user verification (user CAN test now)
-- `needs-data` - Waiting on user to provide captures/info
+- `needs-data` - Waiting on user to provide captures or info
 
 **Only change to `needs-testing` after the code is released and installable.**
 A parser on an unreleased branch is still `in-development` even if the code is complete.
+
+When a user confirms a modem parser works on real hardware, promote
+the modem per the procedure in
+[`MODEM_DIRECTORY_SPEC.md`](packages/cable_modem_monitor_core/docs/MODEM_DIRECTORY_SPEC.md#promotion-procedure).

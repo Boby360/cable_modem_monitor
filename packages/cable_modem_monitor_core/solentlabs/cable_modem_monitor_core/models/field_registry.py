@@ -8,6 +8,8 @@ See FIELD_REGISTRY.md for the full three-tier system.
 
 from __future__ import annotations
 
+from typing import Any
+
 # --- Downstream canonical fields ---
 
 DOWNSTREAM_FIELDS: frozenset[str] = frozenset(
@@ -81,3 +83,34 @@ FIELD_TYPES: frozenset[str] = frozenset(
         "uptime",
     }
 )
+
+# --- Canonical channel key order (for JSON serialization) ---
+
+CHANNEL_FIELD_ORDER: tuple[str, ...] = (
+    "lock_status",
+    "channel_type",
+    "channel_id",
+    "channel_number",
+    "source_channel_number",
+    "modulation",
+    "frequency",
+    "symbol_rate",
+    "power",
+    "snr",
+    "corrected",
+    "uncorrected",
+)
+
+
+def canonicalize_channel_keys(channel: dict[str, Any]) -> dict[str, Any]:
+    """Return a new dict with keys in canonical presentation order.
+
+    Tier 1 keys (see ``CHANNEL_FIELD_ORDER``) appear first in the declared
+    order. Tier 2/3 pass-through keys preserve their original insertion
+    order and are appended at the end. Missing keys are skipped.
+    """
+    ordered: dict[str, Any] = {key: channel[key] for key in CHANNEL_FIELD_ORDER if key in channel}
+    for key, value in channel.items():
+        if key not in ordered:
+            ordered[key] = value
+    return ordered

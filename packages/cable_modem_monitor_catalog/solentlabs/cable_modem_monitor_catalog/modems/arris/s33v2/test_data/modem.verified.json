@@ -93,10 +93,10 @@
     {"lock_status": "locked", "channel_type": "ofdm", "channel_id": 160, "frequency": 807000000, "power": 3.0, "snr": 41.0, "corrected": 2714325708, "uncorrected": 0}
   ],
   "upstream_channels": [
-    {"lock_status": "locked", "channel_type": "qam", "channel_id": 1, "symbol_rate": 6400000, "frequency": 37000000, "power": 47.5},
-    {"lock_status": "locked", "channel_type": "qam", "channel_id": 2, "symbol_rate": 6400000, "frequency": 30600000, "power": 47.0},
-    {"lock_status": "locked", "channel_type": "qam", "channel_id": 3, "symbol_rate": 6400000, "frequency": 24200000, "power": 47.5},
-    {"lock_status": "locked", "channel_type": "qam", "channel_id": 4, "symbol_rate": 6400000, "frequency": 17800000, "power": 47.5},
-    {"lock_status": "locked", "channel_type": "ofdma", "channel_id": 7, "symbol_rate": 34000000, "frequency": 41800000, "power": 41.0}
+    {"lock_status": "locked", "channel_type": "qam", "channel_id": 1, "frequency": 37000000, "symbol_rate": 6400000, "power": 47.5},
+    {"lock_status": "locked", "channel_type": "qam", "channel_id": 2, "frequency": 30600000, "symbol_rate": 6400000, "power": 47.0},
+    {"lock_status": "locked", "channel_type": "qam", "channel_id": 3, "frequency": 24200000, "symbol_rate": 6400000, "power": 47.5},
+    {"lock_status": "locked", "channel_type": "qam", "channel_id": 4, "frequency": 17800000, "symbol_rate": 6400000, "power": 47.5},
+    {"lock_status": "locked", "channel_type": "ofdma", "channel_id": 7, "frequency": 41800000, "symbol_rate": 34000000, "power": 41.0}
   ]
 }

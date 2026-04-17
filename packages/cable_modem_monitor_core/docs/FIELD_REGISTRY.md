@@ -31,6 +31,37 @@ present only on JS-embedded modems when the per-function position
 differs from the unified `channel_number`. See
 [CHANNEL_IDENTIFICATION_SPEC.md](CHANNEL_IDENTIFICATION_SPEC.md) §10.
 
+### Canonical channel key order (JSON serialization)
+
+Channel dicts are presented in a fixed key order when serialized to JSON
+(diagnostics downloads, verified artifacts). Parser insertion order is an
+artifact of each modem's native table layout and differs by parser type —
+so serializers normalize via `canonicalize_channel_keys()` before output.
+
+The order groups keys by role (identification → location → quality →
+errors):
+
+1. `lock_status`
+2. `channel_type`
+3. `channel_id`
+4. `channel_number`
+5. `source_channel_number`
+6. `modulation`
+7. `frequency`
+8. `symbol_rate`
+9. `power`
+10. `snr`
+11. `corrected`
+12. `uncorrected`
+
+Tier 2/3 pass-through fields preserve their original insertion order and
+appear after the Tier 1 keys. Missing keys are skipped — channels remain
+sparse.
+
+Applies to serialization boundaries only. In-memory representations
+(parser output, orchestrator snapshot, HA entity state) are schemaless
+dicts and make no order guarantee.
+
 ---
 
 ## Tier 2 — Registered Fields

@@ -196,7 +196,7 @@ has been validated. Each level builds on the previous.
 |--------|---------|----------|
 | `unsupported` | Placeholder — no parser, awaiting contributor data | None |
 | `awaiting_verification` | Config exists, golden file tests pass against HAR replay | `test_data/*.expected.json` |
-| `confirmed` | Full pipeline verified on real hardware | `test_data/verified.json` |
+| `confirmed` | Full pipeline verified on real hardware | `test_data/modem.verified.json` |
 
 ### Verification artifact
 
@@ -246,6 +246,30 @@ modem's live output.
 
 See `arris/s33v2/test_data/modem.verified.json` for the reference
 example.
+
+### Promotion procedure
+
+When a user reports a successful install and attaches their diagnostics
+download (`config_entry-cable_modem_monitor-*.json`):
+
+1. Open the user's diagnostics file and take the `data` section.
+2. Strip the sections listed under **Stripped sections** above.
+3. Prepend two top-level fields: `verified_at` (ISO date, `YYYY-MM-DD`)
+   and `version` (the alpha/beta string the user ran, e.g.
+   `3.14.0-alpha.16`). Both appear before `config_entry` in the output
+   file for diff readability.
+4. Preserve everything else verbatim — no rounding, no field drops, no
+   reordering within preserved sections.
+5. Write to `test_data/modem.verified.json` (or the matching
+   `modem-{variant}.verified.json` if the user confirmed a variant).
+6. Flip `modem.yaml` `status` from `awaiting_verification` to
+   `confirmed`.
+7. Run the catalog test suite (`pytest packages/cable_modem_monitor_catalog`)
+   to confirm the artifact parses and schema checks pass.
+8. Stage and commit; remove the `needs-testing` issue label.
+
+This procedure is currently manual. Automation is tracked in the beta
+backlog.
 
 ---
 
