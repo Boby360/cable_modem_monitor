@@ -130,7 +130,7 @@ class HTTPResourceLoader:
                 response = self._session.get(url, timeout=self._timeout)
             except requests.RequestException as e:
                 raise ResourceLoadError(
-                    f"Failed to fetch {target.path}: {e}",
+                    f"Failed to fetch {target.path}: {type(e).__name__}: {e}",
                 ) from e
             elapsed_ms = (time.monotonic() - start) * 1000
 

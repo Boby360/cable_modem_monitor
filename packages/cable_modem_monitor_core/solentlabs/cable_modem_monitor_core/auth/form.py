@@ -76,7 +76,7 @@ class FormAuthManager(BaseAuthManager):
                     raise
                 return AuthResult(
                     success=False,
-                    error=f"Login page pre-fetch failed: {e}",
+                    error=f"Login page pre-fetch failed: {type(e).__name__}: {e}",
                 )
 
             # Read hidden fields from the login form
@@ -114,7 +114,7 @@ class FormAuthManager(BaseAuthManager):
                 raise
             return AuthResult(
                 success=False,
-                error=f"Login POST failed: {e}",
+                error=f"Login POST failed: {type(e).__name__}: {e}",
             )
 
         # Step 4: Evaluate success

@@ -148,7 +148,7 @@ class UrlTokenAuthManager(BaseAuthManager):
                 raise
             return AuthResult(
                 success=False,
-                error=f"URL token login failed: {e}",
+                error=f"URL token login failed: {type(e).__name__}: {e}",
             )
 
         if response.status_code != 200:

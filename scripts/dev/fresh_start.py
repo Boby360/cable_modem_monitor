@@ -5,7 +5,7 @@ Fresh Start Script - Reset VS Code state to test new developer experience
 This is ONLY needed to test what a brand new developer sees.
 Normal development doesn't require this script.
 
-Note: Windows users should run this inside WSL2. See docs/setup/WSL2_SETUP.md.
+Note: Windows users should run this inside WSL2. See docs/setup/GETTING_STARTED.md.
 
 Usage:
     python scripts/dev/fresh_start.py

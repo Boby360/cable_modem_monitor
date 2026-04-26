@@ -11,11 +11,9 @@ This directory contains VS Code settings for the Cable Modem Monitor project.
 | `tasks.json` | Quick-access tasks (`Ctrl+Shift+P` → "Tasks: Run Task") |
 | `launch.json` | Debug configurations |
 
-## Quick Start
-
-1. Open project: `code cable_modem_monitor.code-workspace` (recommended) or `code .`
-2. Install recommended extensions when prompted
-3. Run setup: `Ctrl+Shift+P` → Tasks → **⚙️ Setup Local Python Environment**
+> Setting up the project for the first time? See
+> [docs/setup/GETTING_STARTED.md](../docs/setup/GETTING_STARTED.md).
+> This README documents what lives in `.vscode/`.
 
 ## Available Tasks
 
@@ -97,6 +95,5 @@ Press `Ctrl+Shift+P` → **"Tasks: Run Task"**
 | Topic | Location |
 |-------|----------|
 | Environment setup | [docs/setup/GETTING_STARTED.md](../docs/setup/GETTING_STARTED.md) |
-| Dev Container | [docs/setup/DEVCONTAINER.md](../docs/setup/DEVCONTAINER.md) |
 | Troubleshooting | [docs/TROUBLESHOOTING.md](../docs/TROUBLESHOOTING.md) |
 | Development workflow | [CONTRIBUTING.md](../CONTRIBUTING.md) |

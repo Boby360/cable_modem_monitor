@@ -293,7 +293,12 @@ class TestPostHelpers:
         session: requests.Session,
         post_fn: Any,
     ) -> None:
-        """Non-connectivity RequestException returns AuthResult."""
+        """Non-connectivity RequestException returns AuthResult.
+
+        Error must include the exception class name so log analysis can
+        distinguish HTTP-layer errors (HTTPError, ChunkedEncodingError,
+        etc.) from generic transport failures at a glance.
+        """
         with patch.object(
             session,
             "post",
@@ -303,6 +308,40 @@ class TestPostHelpers:
         assert isinstance(result, AuthResult)
         assert result.success is False
         assert "POST failed" in result.error
+        assert "RequestException" in result.error
+
+    # Each row: (exception_class, exception_arg, expected_type_name).
+    # Covers RequestException subclasses that bypass the
+    # ConnectionError/Timeout re-raise gate and are wrapped into
+    # AuthResult.
+    _NON_CONNECTIVITY_EXCEPTIONS = [
+        (requests.HTTPError, "503 server error", "HTTPError"),
+        (requests.TooManyRedirects, "redirect loop", "TooManyRedirects"),
+        (requests.exceptions.ChunkedEncodingError, "bad chunk", "ChunkedEncodingError"),
+        (requests.exceptions.ContentDecodingError, "gzip failed", "ContentDecodingError"),
+        (requests.RequestException, "generic", "RequestException"),
+    ]
+
+    @pytest.mark.parametrize("post_fn", _POST_FUNCTIONS)
+    @pytest.mark.parametrize(
+        "exc_class,exc_arg,expected_type_name",
+        _NON_CONNECTIVITY_EXCEPTIONS,
+        ids=[c[2] for c in _NON_CONNECTIVITY_EXCEPTIONS],
+    )
+    def test_error_includes_exception_class_name(
+        self,
+        session: requests.Session,
+        post_fn: Any,
+        exc_class: type[Exception],
+        exc_arg: str,
+        expected_type_name: str,
+    ) -> None:
+        """AuthResult.error includes the raised exception's class name."""
+        with patch.object(session, "post", side_effect=exc_class(exc_arg)):
+            result = post_fn(session, "http://modem/api", {}, 10)
+        assert isinstance(result, AuthResult)
+        assert result.success is False
+        assert expected_type_name in result.error
 
     @pytest.mark.parametrize("post_fn", _POST_FUNCTIONS)
     def test_not_json_error(

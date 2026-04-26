@@ -190,7 +190,7 @@ def _submit_login(
     except requests.RequestException as e:
         if isinstance(e, requests.ConnectionError | requests.Timeout):
             raise
-        return AuthResult(success=False, error=f"Login POST failed: {e}")
+        return AuthResult(success=False, error=f"Login POST failed: {type(e).__name__}: {e}")
 
     # Check HTTP-level failure before attempting JSON parse —
     # a 401 with an HTML body should not trigger a JSON parse error.

@@ -365,10 +365,12 @@ async def test_reset_button_press_with_probes(
     entity_1.platform = "cable_modem_monitor"
     entity_1.config_entry_id = "test_entry"
     entity_1.entity_id = "sensor.modem_1"
+    entity_1.domain = "sensor"
     entity_2 = MagicMock()
     entity_2.platform = "cable_modem_monitor"
     entity_2.config_entry_id = "test_entry"
     entity_2.entity_id = "sensor.modem_2"
+    entity_2.domain = "sensor"
     mock_entity_reg.entities.values.return_value = [entity_1, entity_2]
 
     # Mock probe detection returning results

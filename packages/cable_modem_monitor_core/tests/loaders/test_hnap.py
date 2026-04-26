@@ -295,8 +295,48 @@ class TestErrors:
         )
         config = _make_parser_config()
 
-        with pytest.raises(HNAPLoadError, match="request failed"):
+        with pytest.raises(HNAPLoadError, match="ConnectionError"):
             loader.fetch(config)
+
+    # Each row: (exception_class, exception_arg, expected_type_name).
+    # Verifies the HNAPLoadError surfaces the underlying requests
+    # exception class so log analysis can distinguish a connection
+    # refusal from an SSL handshake failure at a glance.
+    _POST_EXCEPTIONS = [
+        (requests.ConnectionError, "refused", "ConnectionError"),
+        (requests.Timeout, "timed out", "Timeout"),
+        (requests.exceptions.SSLError, "handshake", "SSLError"),
+        (requests.HTTPError, "bad response", "HTTPError"),
+        (requests.exceptions.ChunkedEncodingError, "bad chunk", "ChunkedEncodingError"),
+    ]
+
+    @pytest.mark.parametrize(
+        "exc_class,exc_arg,expected_type_name",
+        _POST_EXCEPTIONS,
+        ids=[c[2] for c in _POST_EXCEPTIONS],
+    )
+    def test_post_error_includes_exception_class_name(
+        self,
+        exc_class: type[Exception],
+        exc_arg: str,
+        expected_type_name: str,
+    ) -> None:
+        """HNAPLoadError message includes the underlying exception class."""
+        session = requests.Session()
+        loader = HNAPLoader(
+            session=session,
+            base_url="http://127.0.0.1:1",
+            private_key="key",
+            timeout=1,
+        )
+        config = _make_parser_config()
+
+        with (
+            patch.object(session, "post", side_effect=exc_class(exc_arg)),
+            pytest.raises(HNAPLoadError) as exc_info,
+        ):
+            loader.fetch(config)
+        assert expected_type_name in str(exc_info.value)
 
     # ┌────────────────────┬─────────────────────────────────┐
     # │ json_value         │ description                     │

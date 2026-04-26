@@ -313,9 +313,45 @@ class TestHTTPResourceLoader:
         targets = [ResourceTarget(path="/status.html", format="table")]
         with (
             patch.object(session, "get", side_effect=requests.ConnectionError("refused")),
-            pytest.raises(ResourceLoadError, match="Failed to fetch"),
+            pytest.raises(ResourceLoadError, match="ConnectionError"),
         ):
             loader.fetch(targets)
+
+    # Each row: (exception_class, exception_arg, expected_type_name).
+    # Verifies the wrapped ResourceLoadError surfaces the underlying
+    # requests exception class so log analysis can distinguish a
+    # connection refusal from an SSL handshake failure at a glance.
+    _FETCH_EXCEPTIONS = [
+        (requests.ConnectionError, "refused", "ConnectionError"),
+        (requests.Timeout, "timed out", "Timeout"),
+        (requests.exceptions.SSLError, "handshake", "SSLError"),
+        (requests.HTTPError, "bad response", "HTTPError"),
+        (requests.exceptions.ChunkedEncodingError, "bad chunk", "ChunkedEncodingError"),
+    ]
+
+    @pytest.mark.parametrize(
+        "exc_class,exc_arg,expected_type_name",
+        _FETCH_EXCEPTIONS,
+        ids=[c[2] for c in _FETCH_EXCEPTIONS],
+    )
+    def test_fetch_error_includes_exception_class_name(
+        self,
+        exc_class: type[Exception],
+        exc_arg: str,
+        expected_type_name: str,
+    ) -> None:
+        """ResourceLoadError message includes the underlying exception class."""
+        from unittest.mock import patch
+
+        session = requests.Session()
+        loader = HTTPResourceLoader(session, "http://127.0.0.1", timeout=1)
+        targets = [ResourceTarget(path="/status.html", format="table")]
+        with (
+            patch.object(session, "get", side_effect=exc_class(exc_arg)),
+            pytest.raises(ResourceLoadError) as exc_info,
+        ):
+            loader.fetch(targets)
+        assert expected_type_name in str(exc_info.value)
 
     def test_undecoded_response_skipped(self) -> None:
         """Page that decodes to None is excluded from resources."""

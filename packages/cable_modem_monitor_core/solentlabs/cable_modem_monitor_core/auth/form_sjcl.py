@@ -272,7 +272,7 @@ def _fetch_page_vars(
     except requests.RequestException as e:
         if isinstance(e, requests.ConnectionError | requests.Timeout):
             raise
-        return AuthResult(success=False, error=f"Login page fetch failed: {e}")
+        return AuthResult(success=False, error=f"Login page fetch failed: {type(e).__name__}: {e}")
 
     variables: dict[str, str] = {}
     for match in _VAR_RE.finditer(resp.text):
@@ -359,7 +359,7 @@ def _validate_session(
             raise
         return AuthResult(
             success=False,
-            error=f"Session validation POST failed: {e}",
+            error=f"Session validation POST failed: {type(e).__name__}: {e}",
         )
     if resp.status_code != 200:
         return AuthResult(

@@ -157,7 +157,7 @@ class SignalPolicy:
                 self._max_connectivity_backoff,
             )
             self._connectivity_backoff = backoff
-            _logger.info(
+            _logger.warning(
                 "Connection failure [%s] — unreachable (streak: %d, " "backoff: %d polls)",
                 self._model,
                 self._connectivity_streak,
@@ -166,7 +166,7 @@ class SignalPolicy:
             return ConnectionStatus.UNREACHABLE
 
         if signal == CollectorSignal.LOAD_ERROR:
-            _logger.info("Resource load error [%s] — reporting unreachable", self._model)
+            _logger.warning("Resource load error [%s] — reporting unreachable", self._model)
             return ConnectionStatus.UNREACHABLE
 
         if signal == CollectorSignal.PARSE_ERROR:

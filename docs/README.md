@@ -27,9 +27,7 @@ specs, see the indexes in each package's `docs/` directory.
 
 | Document | Covers |
 |----------|--------|
-| [setup/GETTING_STARTED.md](setup/GETTING_STARTED.md) | First-time setup |
-| [setup/DEVCONTAINER.md](setup/DEVCONTAINER.md) | VS Code Dev Container |
-| [setup/WSL2_SETUP.md](setup/WSL2_SETUP.md) | WSL2 environment |
+| [setup/GETTING_STARTED.md](setup/GETTING_STARTED.md) | Setup, daily workflow, troubleshooting (single canonical path: VS Code dev container, WSL2 on Windows) |
 
 ## Package Specs (separate indexes)
 

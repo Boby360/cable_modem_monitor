@@ -74,7 +74,7 @@ class BasicAuthManager(BaseAuthManager):
                     raise
                 return AuthResult(
                     success=False,
-                    error=f"Challenge cookie request failed: {e}",
+                    error=f"Challenge cookie request failed: {type(e).__name__}: {e}",
                 )
 
         return AuthResult(success=True)

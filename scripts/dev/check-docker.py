@@ -3,7 +3,7 @@
 Docker status checker for Linux/macOS.
 Verifies Docker is installed and running before executing Docker commands.
 
-Note: Windows users should run this inside WSL2. See docs/setup/WSL2_SETUP.md.
+Note: Windows users should run this inside WSL2. See docs/setup/GETTING_STARTED.md.
 """
 
 import contextlib

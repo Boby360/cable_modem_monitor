@@ -1,620 +1,247 @@
-# Getting Started with Cable Modem Monitor Development
+# Getting Started
 
-**Choose your development environment and get coding in minutes.**
-
-This is the single guide for setting up your development environment.
-It covers Local Python, Dev Container, and WSL2 paths in one document.
-
----
-
-## TL;DR (30 seconds)
-
-### Hitting permission or setup errors?
-
-```bash
-./scripts/verify-setup.sh    # Checks and fixes common issues
-```
-
-This script verifies Docker permissions, Python installation, venv, and
-pre-commit hooks. Run it if you're seeing "sudo required" or "command not
-found" errors.
+The supported development path is **VS Code + Dev Container** (Docker).
+Windows runs that path inside **WSL2**. There is no second path —
+keeping one canonical environment is what makes "works on my machine"
+match CI.
 
 ---
 
-### Local Python (fastest)
+## TL;DR
 
 ```bash
 git clone https://github.com/solentlabs/cable_modem_monitor.git
 cd cable_modem_monitor
-git lfs install       # Required for HAR test fixtures
-./scripts/setup.sh    # Installs dependencies in .venv
-code .                # Opens in VS Code - that's it!
+git lfs install      # required for HAR test fixtures
+code .               # VS Code prompts: "Reopen in Container"
 ```
 
-### Dev Container (zero setup)
-
-```bash
-git clone https://github.com/solentlabs/cable_modem_monitor.git
-cd cable_modem_monitor
-git lfs install       # Required for HAR test fixtures
-code .                # Opens in VS Code
-# Click "Reopen in Container" when prompted (wait 2-3 min first time)
-```
-
-### Windows (WSL2 required)
-
-```powershell
-wsl --install         # Run in PowerShell as admin, restart when prompted
-```
-
-Then open Ubuntu and follow the **Local Python** path above. See
-[WSL2 Reference](WSL2_SETUP.md) for detailed WSL2 setup (Python 3.12,
-Docker-in-WSL, memory tuning).
-
----
-
-## Choose Your Environment
-
-### Platform Support
-
-| Platform | Support | Notes |
-|----------|---------|-------|
-| **Linux** | Native | Ubuntu, Debian, Fedora, etc. |
-| **macOS** | Native | Intel and Apple Silicon |
-| **Windows** | Via WSL2 | See [WSL2 Reference](WSL2_SETUP.md) |
-| **Chrome OS** | Via Linux (Beta) | Debian container |
-
-> **Why not native Windows?** The toolchain requires a Unix environment:
-> bash scripts, Unix path separators, file permissions, and UTF-8 encoding.
-> WSL2 provides a real Linux environment. VS Code's Remote-WSL extension
-> makes this seamless.
-
-### Decision Tree
-
-```text
-Do you have dependency or environment issues?
-|- YES -> Use Dev Container (guaranteed consistency)
-+- NO  -> Is speed critical for your workflow?
-          |- YES -> Use Local Python (fastest)
-          +- NO  -> Use Dev Container (safer)
-```
-
-**Still unsure?** Start with Local Python -- it's simpler and faster.
-Switch to Dev Container if you hit environment issues.
-
-### Environment Comparison
-
-| Feature | Local Python | Dev Container |
-|---------|--------------|---------------|
-| **Setup Time** | 2 min | 5 min (first time) |
-| **Test Speed** | Fastest | Fast |
-| **IDE Support** | Full | Full |
-| **Isolation** | Uses your system | Complete isolation |
-| **Consistency** | Platform-dependent | Guaranteed |
-| **Cross-Platform** | Varies by OS | Identical everywhere |
-| **Disk Space** | ~500MB | ~2GB |
-| **CI Match** | May differ | Exact match |
-| **Best For** | Daily development | Team consistency |
-
-### Common Scenarios
-
-| I want to... | Use This | Why |
-|--------------|----------|-----|
-| Fix a bug quickly | **Local Python** | Fastest iteration |
-| Add a new feature | **Local Python** | Quick testing |
-| Debug failing CI | **Dev Container** | Matches CI environment |
-| Onboard as new contributor | **Dev Container** | No setup hassles |
-| Work on Windows/Mac/Linux | **Dev Container** | Guaranteed consistency |
-| Run quick unit tests | **Local Python** | Fastest execution |
-| Test integration with real HA | **Dev Container** | Docker-in-Docker support |
-
-### CI/CD Testing
-
-GitHub Actions tests on:
-
-- Ubuntu Latest (primary)
-- macOS Latest (validates Unix compatibility)
-
----
-
-## Prerequisites
-
-### All Platforms
-
-- **Git** for cloning the repository
-- **[Git LFS](https://git-lfs.com/)** for large test fixtures (HAR captures)
-- **Make** (optional, but recommended for convenience commands)
-
-### Local Python Path
-
-- **Python 3.12** installed on your system (pinned to 3.12.x — not 3.11, not 3.13)
-
-### Dev Container Path
-
-- **Docker Desktop** installed and running
-  - Windows/Mac: [Download Docker Desktop](https://www.docker.com/products/docker-desktop)
-  - Linux: [Install Docker Engine](https://docs.docker.com/engine/install/)
-- **VS Code** with the Dev Containers extension
-  - [Download VS Code](https://code.visualstudio.com/)
-  - Install extension: `ms-vscode-remote.remote-containers`
-
-### Windows -- WSL2 Required
-
-Windows requires WSL2 for development. Quick install:
-
-```powershell
-wsl --install         # PowerShell as admin
-# Restart, then open Ubuntu from Start Menu
-```
-
-For detailed WSL2 setup (Python 3.12 via deadsnakes, Docker-in-WSL,
-memory tuning, VS Code Remote-WSL): see [WSL2 Reference](WSL2_SETUP.md).
-
-> **Important:** Clone the repository inside WSL2 (e.g., `~/projects/`),
-> **not** on the Windows filesystem (`/mnt/c/`). The Windows filesystem
-> is dramatically slower from WSL2.
-
----
-
-## Setup: Local Python
-
-1. **Clone the repository:**
-
-   ```bash
-   git clone https://github.com/solentlabs/cable_modem_monitor.git
-   cd cable_modem_monitor
-   git lfs install
-   ```
-
-2. **Run the setup script:**
-
-   ```bash
-   ./scripts/setup.sh
-   ```
-
-   This automatically:
-
-   - Creates Python virtual environment (`.venv`)
-   - Installs all dependencies
-   - Sets up pre-commit hooks
-   - Verifies installation
-
-3. **Open in VS Code:**
-
-   ```bash
-   code .
-   ```
-
-4. **Verify everything works:**
-
-   ```bash
-   make validate
-   ```
-
----
-
-## Setup: Dev Container
-
-1. **Clone the repository:**
-
-   ```bash
-   git clone https://github.com/solentlabs/cable_modem_monitor.git
-   cd cable_modem_monitor
-   git lfs install
-   ```
-
-2. **Open in VS Code:**
-
-   ```bash
-   code .
-   ```
-
-3. **Reopen in container:**
-
-   - VS Code will show: "Reopen in Container" -- Click it
-   - **OR** Press `F1` -> Type "Dev Containers: Reopen in Container"
-   - Wait 2-5 minutes for first-time build
-
-4. **Wait for setup to complete:**
-
-   - VS Code builds the container
-   - Installs Python dependencies automatically
-   - Shows "Dev environment ready!" when complete
-
-5. **Verify everything works:**
-
-   ```bash
-   make validate
-   ```
-
-> **Advanced topics:** For Home Assistant container management, VS Code
-> tasks, and the test panel, see [Dev Container Reference](DEVCONTAINER.md).
-
----
-
-## After Opening in VS Code
-
-### What Notifications to Expect
-
-| Notification | What to Do |
-|--------------|-----------|
-| **"Dev Container configuration available..."** | **Option A:** Click "Reopen in Container" (no local setup needed). **Option B:** Dismiss and use local Python (run `./scripts/setup.sh` first if you haven't). |
-| **"Install recommended extensions?"** | Click **"Install"** -- installs 6 essential extensions: Python (Pylance), Black formatter, Ruff linter, YAML support, Remote Containers, Spell checker. |
-| **"GitLens" or "CodeQL" notifications** | **Optional** -- dismiss if you don't need them. These are not required for development. |
-
----
-
-## Validation and Testing
-
-No matter which environment you choose, validation works the same way.
-
-### Quick Validation (30 seconds)
-
-Run before every commit to catch issues early:
+Click **Reopen in Container**. First build takes 2–5 minutes; subsequent
+opens are instant. When VS Code shows "Dev environment ready!", run:
 
 ```bash
 make validate
 ```
 
-This runs:
-
-- Code linting (Ruff)
-- Format checking (Black)
-- Quick unit tests
-
-### Full CI Validation (2-5 minutes)
-
-Run before creating a pull request:
-
-```bash
-make validate-ci
-# OR
-ruff check . && pytest
-```
-
-This runs:
-
-- Code linting (ruff)
-- Full test suite (pytest)
-
-> **Note:** `pytest` from the repo root runs HA integration tests only.
-> Core and Catalog tests live in their own packages. Use `make test` to
-> run all three test suites, or run each package individually.
-
-```bash
-make test          # All three suites (recommended)
-pytest             # HA integration tests only
-```
-
-### Using VS Code Tasks
-
-Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac) -> **"Tasks: Run Task"**:
-
-- **Quick Validation (Pre-commit)** -- Fast validation before commit
-- **Full CI Validation** -- Complete CI check
-- **Run All Tests** -- Full pytest suite
-- **Format Code** -- Auto-format with Black
-- **Lint Code** -- Check code style with Ruff
+If anything in the setup fails: `./scripts/verify-setup.sh`.
 
 ---
 
-## Daily Workflow
+## Prerequisites
 
-### Starting Your Dev Session
+| Tool | All platforms | Windows-specific |
+|------|---------------|------------------|
+| Git | required | required |
+| [Git LFS](https://git-lfs.com/) | required (HAR fixtures) | required |
+| Docker | Docker Desktop or Docker Engine | Docker Desktop with WSL2 backend |
+| VS Code + Dev Containers extension (`ms-vscode-remote.remote-containers`) | required | required (installed on Windows side) |
+| WSL2 + Ubuntu | — | required (`wsl --install` from PowerShell as admin) |
 
-**Local Python:**
-
-```bash
-cd cable_modem_monitor
-source .venv/bin/activate  # Activate venv
-code .                     # Open in VS Code
-```
-
-**Dev Container:**
-
-```bash
-cd cable_modem_monitor
-code .                     # VS Code will reopen in container automatically
-```
-
-### Making Changes
-
-1. **Create a feature branch:**
-
-   ```bash
-   git checkout -b feature/my-new-feature
-   ```
-
-2. **Make your changes**
-
-3. **Run tests frequently:**
-
-   ```bash
-   make test-quick      # Quick unit tests
-   # OR use VS Code Testing panel
-   ```
-
-4. **Validate before commit:**
-
-   ```bash
-   make validate
-   ```
-
-5. **Commit your changes:**
-
-   ```bash
-   git commit -am "Add my new feature"
-   ```
-
-   Pre-commit hooks will automatically:
-
-   - Format code with Black
-   - Check code style with Ruff
-   - Validate YAML files
-
-6. **Push and create PR:**
-
-   ```bash
-   git push -u origin feature/my-new-feature
-   ```
-
-See [CONTRIBUTING.md](../../CONTRIBUTING.md) for PR guidelines, code style,
-and commit message format.
+**Windows users:** clone the repo *inside* WSL2 (e.g. `~/projects/`),
+not on the Windows filesystem (`/mnt/c/`). The 9P bridge is dramatically
+slower and breaks file watchers.
 
 ---
 
-## Switching Between Environments
+## What's inside the container
 
-Your code and git state are preserved when switching.
+- Python 3.12 with all dependencies pre-installed
+- Docker-in-Docker for running Home Assistant test containers
+- CodeQL CLI for security analysis
+- VS Code extensions: Python (Pylance), Black, Ruff, YAML, CodeQL, Spell checker
 
-### From Local Python to Dev Container
-
-1. Save your work
-2. Press `F1` -> "Dev Containers: Reopen in Container"
-3. Wait for container to start (instant if previously built)
-4. Your code is unchanged, now running in container
-
-### From Dev Container to Local Python
-
-1. Press `F1` -> "Dev Containers: Reopen Folder Locally"
-2. Activate virtual environment:
-
-   ```bash
-   source .venv/bin/activate
-   ```
-
-3. Your code is unchanged, now running locally
+Project files mount at `/workspaces/cable_modem_monitor`. All commands
+run inside the container, never on the host.
 
 ---
 
-## Testing Fresh Developer Experience (Optional)
+## After opening in VS Code
 
-**Only needed if you want to test the new developer onboarding
-experience.** Normal development doesn't require this.
+| Notification | What to do |
+|--------------|------------|
+| "Dev Container configuration available…" | Click **Reopen in Container**. |
+| "Install recommended extensions?" | Click **Install** — six extensions, all required. |
+| "GitLens" / "CodeQL" extras | Optional; dismiss if not needed. |
 
-### Cross-Platform Python Script (Recommended)
+---
+
+## Validation
 
 ```bash
-python scripts/dev/fresh_start.py
+make validate       # Ruff + Black + quick tests (~30s)
+make validate-ci    # Full ruff + pytest (2–5 min) — run before push
+make test           # All three test suites (Core, Catalog, HA)
 ```
 
-This script:
+Or use the Testing panel (beaker icon) — pytest tests auto-discover.
+If they don't appear: refresh the panel, or check the Python
+interpreter in the bottom-left status bar.
 
-- Clears VS Code's workspace cache for this project
-- Optionally removes `.venv` to test complete setup
-- Works on Windows, macOS, and Linux
-- Detects if running from VS Code terminal
+> CodeQL tests live in `cable-modem-monitor-ql/tests/` and don't appear
+> in the Testing panel. Run them via GitHub Actions or `codeql test run`.
 
-**Or use VS Code task:**
+---
 
-- Press `Ctrl+Shift+P` -> Tasks: Run Task -> **"Fresh Start (Reset VS Code State)"**
+## Home Assistant container management
 
-After running, close VS Code and reopen with `code .` to see the fresh
-developer experience.
+VS Code tasks (`Ctrl+Shift+P` → **Tasks: Run Task**):
+
+| Task | Purpose |
+|------|---------|
+| **HA: Start (Fresh)** | Clean state, no old data |
+| **HA: Start (Keep Data)** | Preserves users/config from last session |
+| **HA: Restart (Reload Integration)** | Picks up code changes; preserves state |
+| **HA: Stop** | Stop the HA container |
+| **HA: View Logs** | Tail HA logs in real time |
+| **HA: Clean All Data (Reset)** | Wipe HA's local test config (users, integrations, settings) |
+
+After starting, open <http://localhost:8123>.
+
+---
+
+## Daily workflow
+
+```bash
+git checkout -b feature/my-change
+# edit, run tests via Testing panel or `make test-quick`
+make validate
+git commit -am "..."
+git push -u origin feature/my-change
+```
+
+Pre-commit hooks auto-format with Black and lint with Ruff. See
+[CONTRIBUTING.md](../../CONTRIBUTING.md) for PR guidelines and commit
+message conventions.
+
+---
+
+## Git worktrees
+
+Worktrees share the main repo's `.venv` automatically. Every dev script
+(`run-python.sh`, `run-pyright.sh`, `activate_venv.sh`, pre-commit
+hooks) calls `scripts/dev/resolve-venv.sh`, which:
+
+1. Looks for `.venv` in the current directory.
+2. Falls back to the main worktree via `git rev-parse --git-common-dir`.
+
+Create one anywhere convenient (a sibling directory, or your team's
+preferred worktree location):
+
+```bash
+git worktree add ../my-feature feature/v3.14.0
+cd ../my-feature
+```
+
+A `.venv` symlink is created on first use (gitignored). VS Code,
+Pylance, and the test runner all work without setup.
+
+---
+
+## Windows / WSL2 setup
+
+If you're on Windows and don't yet have WSL2:
+
+```powershell
+# PowerShell as Administrator
+wsl --install
+# Restart when prompted; Ubuntu launches automatically afterward.
+```
+
+In Ubuntu:
+
+```bash
+cat /etc/os-release      # confirm Ubuntu 22.04 or 24.04
+
+# Install Docker (or use Docker Desktop with WSL2 backend)
+sudo apt install docker.io
+sudo usermod -aG docker $USER
+exit                     # log back in to apply group
+
+# Verify
+docker run hello-world
+```
+
+Then clone the repo under `~/projects/` and run `code .` — VS Code
+detects WSL2, installs Remote-WSL, and opens the folder. The
+bottom-left status bar should read **"WSL: Ubuntu"**.
+
+### WSL2 memory tuning
+
+If WSL2 uses too much RAM, create `C:\Users\<username>\.wslconfig`:
+
+```ini
+[wsl2]
+memory=8GB
+processors=4
+```
+
+Then `wsl --shutdown`.
 
 ---
 
 ## Troubleshooting
 
-### "Cannot find Python interpreter"
-
-**Local Python:**
-
-1. Ensure you ran `./scripts/setup.sh`
-2. Activate venv: `source .venv/bin/activate`
-3. In VS Code: Click Python version in bottom-left -> Select `.venv/bin/python`
-
-**Dev Container:**
-
-1. Ensure Docker is running: `docker ps`
-2. Rebuild container: `F1` -> "Dev Containers: Rebuild Container"
-
-### "Tests not showing in VS Code Testing panel"
-
-1. **Check Python extension loaded:**
-   Bottom status bar should show Python version.
-   If not: `F1` -> "Python: Select Interpreter" -> Choose correct Python.
-
-2. **Refresh test discovery:**
-   Testing panel -> Click refresh icon.
-   Or: `F1` -> "Python: Refresh Tests".
-
-3. **Check pytest is installed:**
-
-   ```bash
-   pip list | grep pytest
-   ```
-
-### "Import errors" or "Module not found"
-
-**Local Python:**
+### Container won't start
 
 ```bash
-# Reinstall dependencies
-./scripts/setup.sh
+docker ps                # is Docker running?
 ```
 
-**Dev Container:**
+If not, start Docker Desktop. Then in VS Code: `F1` → **Dev Containers:
+Rebuild Container**.
 
-- Rebuild container: `F1` -> "Dev Containers: Rebuild Container"
-
-### "Pre-commit hooks failing"
+### Port 8123 already in use
 
 ```bash
-# Auto-fix most issues
-make format
-
-# Check what's wrong
-make lint
-
-# Update hooks
-pre-commit install --install-hooks
+docker ps
+docker stop ha-cable-modem-test
 ```
 
-### "Docker container won't start"
+Or run the **HA: Stop** task.
 
-1. **Check Docker is running:**
+### HAR files appear empty / `JSONDecodeError`
 
-   ```bash
-   docker ps
-   ```
-
-2. **Restart Docker Desktop**
-
-3. **Rebuild container:**
-   `F1` -> "Dev Containers: Rebuild Container"
-
-### "HAR files are empty or tests fail with JSON decode errors"
-
-HAR test fixtures are stored with Git LFS. If they appear as small text
-files (~130 bytes starting with `version https://git-lfs.`), LFS hasn't
-fetched the actual content:
+HAR fixtures are stored in Git LFS. If a file is ~130 bytes starting
+with `version https://git-lfs.`, LFS hasn't fetched the content:
 
 ```bash
-git lfs install   # Enable LFS (once per machine)
-git lfs pull      # Download all LFS files
+git lfs install   # once per machine
+git lfs pull
 ```
 
-### "Which environment should I use?"
+### Pre-commit hooks failing
 
-- **Speed matters most?** -> Local Python
-- **Need consistency with CI?** -> Dev Container
-- **Hit environment issues?** -> Dev Container
-- **New to the project?** -> Dev Container (easier)
-- **Regular contributor?** -> Either works (your preference)
+```bash
+make format                          # auto-fix
+make lint                            # see what's wrong
+pre-commit install --install-hooks   # update hooks
+```
+
+### Permission denied on scripts (Linux/WSL2)
+
+```bash
+chmod +x scripts/*.sh scripts/dev/*.sh
+```
+
+### Docker permission denied
+
+```bash
+groups                               # should include 'docker'
+sudo usermod -aG docker $USER
+exit                                 # log back in
+```
+
+### Tests not appearing in Testing panel
+
+1. Check Python interpreter in bottom-left status bar
+   (should be `/usr/local/bin/python3.12` inside the container).
+2. Refresh: Testing panel → refresh icon, or `F1` → **Python: Refresh
+   Tests**.
 
 ---
 
-## Platform-Specific Notes
+## Getting help
 
-### macOS
-
-- **"permission denied" for scripts:**
-
-  ```bash
-  chmod +x scripts/setup.sh scripts/dev/*.sh
-  ```
-
-- **"make: command not found":**
-
-  ```bash
-  xcode-select --install
-  ```
-
-- Apple Silicon (M1/M2/M3) may be slower on first Dev Container build.
-
-### Linux
-
-- Works perfectly -- fastest option for Local Python.
-- Ensure your user is in the `docker` group for Dev Containers:
-
-  ```bash
-  sudo usermod -aG docker $USER
-  # Log out and back in
-  ```
-
-- **"make: command not found":**
-
-  ```bash
-  sudo apt install build-essential
-  ```
-
-### Windows
-
-All development happens inside WSL2. See [WSL2 Reference](WSL2_SETUP.md).
-
----
-
-## Quick Command Reference
-
-| Task | Command |
-|------|---------|
-| **Setup** | |
-| Clone repo | `git clone https://github.com/solentlabs/cable_modem_monitor.git` |
-| Enable Git LFS | `git lfs install` (once per machine, after clone) |
-| Setup local Python | `./scripts/setup.sh` |
-| Open in VS Code | `code .` |
-| Reopen in container | `F1` -> "Dev Containers: Reopen in Container" |
-| **Development** | |
-| Activate venv | `source scripts/dev/activate_venv.sh` (worktree-aware) |
-| Run quick tests | `make test-quick` |
-| Run all tests | `make test` |
-| Format code | `make format` |
-| Lint code | `make lint` |
-| **Validation** | |
-| Quick validation | `make validate` |
-| Full CI validation | `make validate-ci` or `ruff check . && pytest` |
-| **Other** | |
-| Fresh start test | `python scripts/dev/fresh_start.py` |
-| View all tasks | `Ctrl+Shift+P` -> "Tasks: Run Task" |
-| Switch to container | `F1` -> "Dev Containers: Reopen in Container" |
-| Switch to local | `F1` -> "Dev Containers: Reopen Folder Locally" |
-
----
-
-## Git Worktrees
-
-Git worktrees let you work on multiple branches simultaneously without
-stashing or switching. The project's `.venv` lives in the main repo
-root — worktrees don't get their own copy.
-
-### How venv resolution works
-
-All dev scripts use `scripts/dev/resolve-venv.sh` to find the venv:
-
-1. Check for `.venv` in the current directory (normal clone)
-2. If not found, resolve the main worktree via
-   `git rev-parse --git-common-dir` and use its `.venv`
-
-This is transparent — `run-python.sh`, `run-pyright.sh`,
-`activate_venv.sh`, `quick_test.sh`, and pre-commit hooks all
-resolve the venv automatically.
-
-### Creating a worktree
-
-```bash
-git worktree add .claude/worktrees/my-feature feature/v3.14.0
-cd .claude/worktrees/my-feature
-```
-
-Pre-commit hooks, test runners, VS Code, and Pylance all work
-immediately — no manual setup needed. On first use, a `.venv`
-symlink is created automatically (gitignored) pointing to the main
-repo's venv.
-
----
-
-## Getting Help
-
-**Setup Issues:**
-
-- Check [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) for integration-level troubleshooting
-- Check [Dev Container Reference](DEVCONTAINER.md) for container-specific topics
-
-**Development Questions:**
-
-- See [CONTRIBUTING.md](../../CONTRIBUTING.md) for workflow and guidelines
-
-**Found a Bug?**
-
-- [Open an issue](https://github.com/solentlabs/cable_modem_monitor/issues)
+- Integration-level issues: [TROUBLESHOOTING.md](../TROUBLESHOOTING.md)
+- Workflow / PR guidelines: [CONTRIBUTING.md](../../CONTRIBUTING.md)
+- Bug report: [open an issue](https://github.com/solentlabs/cable_modem_monitor/issues)

@@ -129,7 +129,7 @@ def post_json(
     except requests.RequestException as e:
         if isinstance(e, requests.ConnectionError | requests.Timeout):
             raise
-        return AuthResult(success=False, error=f"POST failed: {e}")
+        return AuthResult(success=False, error=f"POST failed: {type(e).__name__}: {e}")
 
     result = parse_json_dict(resp, context=context or f"POST {url}")
     if isinstance(result, AuthResult):
@@ -169,7 +169,7 @@ def post_form(
     except requests.RequestException as e:
         if isinstance(e, requests.ConnectionError | requests.Timeout):
             raise
-        return AuthResult(success=False, error=f"POST failed: {e}")
+        return AuthResult(success=False, error=f"POST failed: {type(e).__name__}: {e}")
 
     result = parse_json_dict(resp, context=context or f"POST {url}")
     if isinstance(result, AuthResult):

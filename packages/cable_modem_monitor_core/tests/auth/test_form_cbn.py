@@ -197,10 +197,12 @@ FAILURE_CASES = [
     # (description, setup_fn, expected_error_substring)
     ("login_page_http_error",   _setup_login_page_error, "Login page returned HTTP 500"),
     ("missing_session_cookie",  _setup_missing_cookie,   "did not set 'sessionToken' cookie"),
-    ("login_post_failed",       _setup_post_failure,     "Login POST failed"),
+    # Network-error cases include the requests exception class name so
+    # log analysis can tell a refusal from a timeout at a glance.
+    ("login_post_failed",       _setup_post_failure,     "Login POST failed: ConnectionError"),
     ("login_body_rejected",     _setup_login_rejected,   "Login failed: idloginincorrect"),
     ("no_sid_in_response",      _setup_no_sid,           "SID not found in response"),
-    ("login_page_network_error", _setup_network_error,   "Failed to fetch login page"),
+    ("login_page_network_error", _setup_network_error,   "Failed to fetch login page: ConnectionError"),
     ("login_post_302_redirect",  _setup_login_post_redirect, "Login POST returned HTTP 302"),
 ]
 # fmt: on

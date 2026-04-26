@@ -149,7 +149,7 @@ class HnapAuthManager(BaseAuthManager):
                 raise
             return AuthResult(
                 success=False,
-                error=f"HNAP challenge request failed: {e}",
+                error=f"HNAP challenge request failed: {type(e).__name__}: {e}",
             )
 
         data = parse_json_dict(
@@ -245,7 +245,7 @@ class HnapAuthManager(BaseAuthManager):
                 raise
             return AuthResult(
                 success=False,
-                error=f"HNAP login request failed: {e}",
+                error=f"HNAP login request failed: {type(e).__name__}: {e}",
             )
 
         data = parse_json_dict(

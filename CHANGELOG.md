@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (developer-only — no user-facing impact)
 
+- **Setup docs collapsed to a single canonical path.**
+  `docs/setup/DEVCONTAINER.md` and `docs/setup/WSL2_SETUP.md` are
+  removed; `docs/setup/GETTING_STARTED.md` is the only setup doc and
+  describes one supported environment (VS Code dev container, with
+  WSL2 as the Windows hosting layer). Maintaining parallel
+  Local-Python / Dev-Container / WSL2 paths created drift between
+  guides; collapsing to one path matches what we actually test in CI.
 - **Internal restructure: catalog authoring pipeline carved out of
   Core into a repo-only package.** The modem onboarding pipeline
   (HAR analysis, YAML generation, golden-file construction, parity
@@ -71,6 +78,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Transport-failure logs name the exception class** — auth and
+  resource-load failures now prefix the wrapped requests exception
+  class (`ConnectionError:`, `ConnectTimeout:`, `SSLError:`,
+  `RemoteDisconnected:`, …) before the upstream message. Lets log
+  scans and AI-assisted triage tell a refusal from a handshake
+  failure from a half-closed socket without parsing the inner tuple
+  representation. Applies to the loader chain (HTTP/HNAP/CBN), every
+  auth strategy, and the collector's `Auth failed` detail line.
+- **Log levels: genuine failures emit at `WARNING`, not `INFO`** —
+  the collector's resource-load and connection-failure paths and the
+  policy module's connectivity-failure / load-error transitions were
+  previously `INFO`, indistinguishable from per-poll progress. They
+  now surface at `WARNING` so the noise floor reflects real
+  problems.
+- **Reset-entity log breaks down by platform** — the
+  `Removing N entities for reset` line now appends a per-platform
+  count (`3 button, 141 sensor`), so the number reconciles with each
+  platform's own `Created N entities` line on re-init.
 - **ModemHealth freshness gate** — the health probe exposes
   `latest_probe_at`; the orchestrator refuses to clear connectivity
   backoff based on a stale RESPONSIVE reading from before an

@@ -130,7 +130,7 @@ class FormNonceAuthManager(BaseAuthManager):
                 raise
             return AuthResult(
                 success=False,
-                error=f"Nonce login POST failed: {e}",
+                error=f"Nonce login POST failed: {type(e).__name__}: {e}",
             )
 
         # Step 4: Parse text-prefix response

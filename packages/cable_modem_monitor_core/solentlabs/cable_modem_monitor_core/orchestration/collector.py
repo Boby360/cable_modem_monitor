@@ -132,17 +132,18 @@ class ModemDataCollector:
                 error=str(exc),
             )
         except (requests.ConnectionError, requests.Timeout) as exc:
+            error_with_type = f"{type(exc).__name__}: {exc}"
             _log_auth_failure_detail(
                 model=self._modem_config.model,
                 strategy=_strategy_name(self._modem_config),
                 response=None,
-                error=str(exc),
+                error=error_with_type,
                 password=self._password,
             )
             return ModemResult(
                 success=False,
                 signal=CollectorSignal.CONNECTIVITY,
-                error=str(exc),
+                error=error_with_type,
             )
 
         if not auth_result.success:
@@ -185,14 +186,14 @@ class ModemDataCollector:
                     signal=CollectorSignal.LOAD_AUTH,
                     error=f"{exc.status_code} on {exc.path} — {hint}",
                 )
-            _logger.info("Resource load error [%s]: %s", self._modem_config.model, exc)
+            _logger.warning("Resource load error [%s]: %s", self._modem_config.model, exc)
             return ModemResult(
                 success=False,
                 signal=CollectorSignal.LOAD_ERROR,
                 error=str(exc),
             )
         except (requests.ConnectionError, requests.Timeout) as exc:
-            _logger.info("Connection failed during resource loading [%s]", self._modem_config.model)
+            _logger.warning("Connection failed during resource loading [%s]", self._modem_config.model)
             return ModemResult(
                 success=False,
                 signal=CollectorSignal.CONNECTIVITY,
@@ -469,7 +470,7 @@ class ModemDataCollector:
 
         # Connection/timeout — modem unreachable (UC-30/UC-31)
         if exc.status_code is None and isinstance(cause, requests.ConnectionError | requests.Timeout):
-            _logger.info(
+            _logger.warning(
                 "HNAP connection failed [%s]: %s",
                 self._modem_config.model,
                 exc,
@@ -494,7 +495,7 @@ class ModemDataCollector:
             )
 
         # Fresh session HTTP error or JSON parse — genuine problem (UC-22)
-        _logger.info(
+        _logger.warning(
             "HNAP load error [%s]: %s",
             self._modem_config.model,
             exc,

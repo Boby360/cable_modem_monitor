@@ -108,7 +108,7 @@ class HNAPLoader:
             )
         except requests.RequestException as e:
             raise HNAPLoadError(
-                f"HNAP GetMultipleHNAPs request failed: {e}",
+                f"HNAP GetMultipleHNAPs request failed: {type(e).__name__}: {e}",
             ) from e
         elapsed_ms = (time.monotonic() - start) * 1000
 

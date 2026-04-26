@@ -112,9 +112,10 @@ class CBNLoader:
             )
         except requests.RequestException as exc:
             _logger.warning(
-                "CBN fetch failed for fun=%s [%s]: %s",
+                "CBN fetch failed for fun=%s [%s]: %s: %s",
                 fun,
                 self._model,
+                type(exc).__name__,
                 exc,
             )
             return None

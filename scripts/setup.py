@@ -150,7 +150,7 @@ def print_python_install_instructions(required_major, required_minor):
     elif platform.system() == "Windows":
         print("  Windows - use WSL2 for development (native Windows not supported)")
         print("")
-        print("    See docs/setup/WSL2_SETUP.md for instructions")
+        print("    See docs/setup/GETTING_STARTED.md for instructions")
         print("")
     else:
         print("  Install Python 3.12 using your system's package manager or pyenv:")

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import functools
 import logging
+from collections import Counter
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.const import CONF_HOST, EntityCategory
@@ -255,14 +256,24 @@ class ResetEntitiesButton(_ButtonBase):
 
         # Remove all entities
         entity_reg = er.async_get(self.hass)
-        entities_to_remove = [
-            entity_entry.entity_id
+        entries_to_remove = [
+            entity_entry
             for entity_entry in entity_reg.entities.values()
             if (entity_entry.platform == DOMAIN and entity_entry.config_entry_id == self._entry.entry_id)
         ]
+        entities_to_remove = [entry.entity_id for entry in entries_to_remove]
 
         model = self._entry.runtime_data.modem_identity.model
-        _LOGGER.info("Removing %d entities for reset [%s]", len(entities_to_remove), model)
+        # Breakdown by platform so the count reconciles with each
+        # platform's own "Created N entities" log on re-init.
+        breakdown = Counter(entry.domain for entry in entries_to_remove)
+        breakdown_str = ", ".join(f"{n} {domain}" for domain, n in sorted(breakdown.items()))
+        _LOGGER.info(
+            "Removing %d entities for reset [%s]: %s",
+            len(entities_to_remove),
+            model,
+            breakdown_str,
+        )
         for entity_id in entities_to_remove:
             entity_reg.async_remove(entity_id)
 

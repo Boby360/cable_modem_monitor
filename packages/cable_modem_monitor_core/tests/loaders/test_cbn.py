@@ -5,8 +5,10 @@ Table-driven for error scenarios. Mock HTTP session for all tests.
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock
 
+import pytest
 import requests
 from requests.cookies import RequestsCookieJar
 from solentlabs.cable_modem_monitor_core.loaders.cbn import CBNLoader
@@ -163,6 +165,41 @@ class TestErrorHandling:
 
         assert "10" not in result
         assert "11" in result
+
+    # Each row: (exception_class, exception_arg, expected_type_name).
+    # CBN warns and skips on transport errors instead of raising, so
+    # the assertion is on the captured WARNING log record.
+    _FETCH_EXCEPTIONS = [
+        (requests.ConnectionError, "refused", "ConnectionError"),
+        (requests.Timeout, "timed out", "Timeout"),
+        (requests.exceptions.SSLError, "handshake", "SSLError"),
+        (requests.HTTPError, "bad response", "HTTPError"),
+    ]
+
+    @pytest.mark.parametrize(
+        "exc_class,exc_arg,expected_type_name",
+        _FETCH_EXCEPTIONS,
+        ids=[c[2] for c in _FETCH_EXCEPTIONS],
+    )
+    def test_fetch_warning_includes_exception_class_name(
+        self,
+        caplog: pytest.LogCaptureFixture,
+        exc_class: type[Exception],
+        exc_arg: str,
+        expected_type_name: str,
+    ) -> None:
+        """CBN fetch failure warning includes the exception class name."""
+        session = _make_session()
+        session.post.side_effect = exc_class(exc_arg)
+
+        loader = _make_loader(session)
+        with caplog.at_level(logging.WARNING):
+            result = loader.fetch(_targets("10"))
+
+        assert "10" not in result
+        warnings = [r for r in caplog.records if "CBN fetch failed" in r.message]
+        assert warnings, "expected a CBN fetch failure warning"
+        assert any(expected_type_name in r.message for r in warnings)
 
     def test_malformed_xml_skipped(self) -> None:
         """Malformed XML response skips the target."""

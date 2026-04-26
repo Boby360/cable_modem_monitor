@@ -76,7 +76,7 @@ class FormCbnAuthManager(BaseAuthManager):
         except requests.RequestException as exc:
             return AuthResult(
                 success=False,
-                error=f"Failed to fetch login page: {exc}",
+                error=f"Failed to fetch login page: {type(exc).__name__}: {exc}",
             )
 
         if not response.ok:
@@ -119,7 +119,7 @@ class FormCbnAuthManager(BaseAuthManager):
         except requests.RequestException as exc:
             return AuthResult(
                 success=False,
-                error=f"Login POST failed: {exc}",
+                error=f"Login POST failed: {type(exc).__name__}: {exc}",
             )
 
         # Step 5: Check response for success + extract SID
