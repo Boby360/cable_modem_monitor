@@ -20,7 +20,6 @@ from solentlabs.cable_modem_monitor_catalog_tools.analysis.mapping.system_info i
     detect_system_info,
 )
 from solentlabs.cable_modem_monitor_catalog_tools.analysis.types import FleetPatterns
-
 from tests._helpers import collect_fixtures, load_fixture
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "system_info"

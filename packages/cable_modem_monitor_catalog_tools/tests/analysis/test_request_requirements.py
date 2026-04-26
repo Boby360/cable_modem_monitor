@@ -16,7 +16,6 @@ from solentlabs.cable_modem_monitor_catalog_tools.analysis.request_requirements 
     detect_request_requirements,
 )
 from solentlabs.cable_modem_monitor_catalog_tools.analysis.session import SessionDetail
-
 from tests._helpers import collect_fixtures, load_fixture
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "request_requirements"

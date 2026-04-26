@@ -17,7 +17,6 @@ from pathlib import Path
 import pytest
 import yaml
 from solentlabs.cable_modem_monitor_catalog_tools.generate_config import generate_config
-
 from tests._helpers import collect_fixtures, load_fixture
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "generate_config"

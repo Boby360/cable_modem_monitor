@@ -36,7 +36,6 @@ from solentlabs.cable_modem_monitor_catalog_tools.analysis.format.table_analysis
 )
 from solentlabs.cable_modem_monitor_catalog_tools.analysis.format.types import DetectedTable
 from solentlabs.cable_modem_monitor_catalog_tools.analysis.types import FleetPatterns
-
 from tests._helpers import collect_fixtures, load_fixture  # type: ignore[attr-defined]
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "format"

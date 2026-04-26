@@ -31,7 +31,6 @@ from solentlabs.cable_modem_monitor_catalog_tools.analysis.format.hnap import (
     _resolve_large_integers,
     detect_hnap_sections,
 )
-
 from tests._helpers import collect_fixtures, load_fixture
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "format_hnap"

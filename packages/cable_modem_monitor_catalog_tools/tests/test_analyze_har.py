@@ -13,7 +13,6 @@ import pytest
 from solentlabs.cable_modem_monitor_catalog_tools.analyze_har import (
     analyze_har,
 )
-
 from tests._helpers import collect_fixtures, load_fixture, write_har
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "analyze_har"

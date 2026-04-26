@@ -16,7 +16,6 @@ from solentlabs.cable_modem_monitor_catalog_tools.analysis.format.dispatcher imp
     _direction_from_json,
     _direction_from_resource,
 )
-
 from tests._helpers import collect_fixtures, load_fixture
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "format_dispatch"

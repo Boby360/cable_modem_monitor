@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 from solentlabs.cable_modem_monitor_catalog_tools.analysis.actions import ActionsDetail
-
 from tests._helpers import collect_fixtures, load_fixture
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "actions" / "http"

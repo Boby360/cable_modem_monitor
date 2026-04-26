@@ -13,7 +13,6 @@ from solentlabs.cable_modem_monitor_catalog_tools.analysis.js_endpoints import (
     detect_uncaptured_endpoints,
     extract_endpoints_from_js,
 )
-
 from tests._helpers import collect_fixtures, load_fixture
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "js_endpoints"

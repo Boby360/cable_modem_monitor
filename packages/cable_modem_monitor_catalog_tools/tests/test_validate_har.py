@@ -24,7 +24,6 @@ from solentlabs.cable_modem_monitor_catalog_tools.validate_har import (
     ValidationResult,
     validate_har,
 )
-
 from tests._helpers import collect_fixtures, load_fixture, write_har
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "validate_har"

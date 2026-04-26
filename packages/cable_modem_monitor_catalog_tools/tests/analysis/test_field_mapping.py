@@ -35,7 +35,6 @@ from solentlabs.cable_modem_monitor_catalog_tools.analysis.mapping.types import 
     SystemInfoFieldDetail,
     SystemInfoSourceDetail,
 )
-
 from tests._helpers import collect_fixtures, load_fixture
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "field_mapping"

@@ -15,7 +15,6 @@ from solentlabs.cable_modem_monitor_catalog_tools.analysis.session import (
     _cookie_name_from_set_cookie,
     _is_session_cookie,
 )
-
 from tests._helpers import collect_fixtures, load_fixture
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "session"

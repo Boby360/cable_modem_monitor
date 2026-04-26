@@ -3,6 +3,7 @@
   "ignores": [
     ".venv/**",
     "RAW_DATA/**",
-    "cable-modem-monitor-ql/**"
+    "cable-modem-monitor-ql/**",
+    "codeql/**"
   ]
 }

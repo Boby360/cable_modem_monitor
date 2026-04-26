@@ -12,7 +12,7 @@ set -euo pipefail
 # Type-checker / linter configs use anchored regex patterns to exclude
 # directories from analysis — these are pattern-matchers, not file
 # references that fail when the path is absent.
-EXCLUDE_PATTERN='(\.gitignore|pyrightconfig\.json|mypy\.ini|check-local-path-refs\.sh)$'
+EXCLUDE_PATTERN='(\.gitignore|pyrightconfig\.json|mypy\.ini|\.markdownlint-cli2\.jsonc|check-local-path-refs\.sh)$'
 
 # --- Extract directory names from .gitignore ---
 #

@@ -58,7 +58,7 @@ type-check, and PII; pre-push hooks run the full lint and test suite
 VS Code tasks bring up a local Home Assistant container with the
 integration bind-mounted:
 
-- **🚀 HA: Start** — start HA at http://localhost:8123
+- **🚀 HA: Start** — start HA at <http://localhost:8123>
 - **🚀 HA: Start (Debug)** — same, with `custom_components.cable_modem_monitor`
   at DEBUG log level
 - **📋 HA: View Logs** — tail the HA log
