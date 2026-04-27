@@ -88,6 +88,84 @@ The tag push triggers `.github/workflows/release.yml` which:
 
 Verify at: <https://github.com/solentlabs/cable_modem_monitor/releases>
 
+## Release Tiers
+
+All three tiers — alpha, beta, stable — distribute the same way:
+PyPI publish on tag push, GitHub Release with zip asset, HACS
+visibility gated by the per-integration pre-release switch. The
+distinction between tiers is the version string and the GitHub
+Release `prerelease` flag, not the install mechanism.
+
+| Tier | Tag pattern | PyPI | GitHub Release | HACS visibility |
+|------|-------------|------|----------------|-----------------|
+| Alpha | `v*.*.*-alpha.*` | Published (`publish.yml`) | Pre-release with zip asset | Pre-release switch ON |
+| Beta | `v*.*.*-beta.*` | Published | Pre-release with zip asset | Pre-release switch ON |
+| Stable | `v*.*.*` | Published | Stable with zip asset | Default (always visible) |
+
+HACS's pre-release switch is binary — it doesn't distinguish alpha
+from beta. Users who flip it on see whichever pre-release is newest.
+That's the intended HACS pattern for opt-in pre-stable testing, and
+mature integrations (including HACS itself) follow it.
+
+Tags live on main. Cut alphas and betas as tags on `main` after the
+release-prep PR merges — same flow for all three tiers.
+
+### `hacs.json` configuration
+
+```json
+{
+  "name": "Cable Modem Monitor",
+  "content_in_root": false,
+  "render_readme": true,
+  "homeassistant": "2024.12.0",
+  "zip_release": true,
+  "filename": "cable_modem_monitor.zip",
+  "hide_default_branch": true
+}
+```
+
+`zip_release: true` and `hide_default_branch: true` are paired. With
+both set, HACS distributes only the zip assets attached to GitHub
+Releases and hides the default-branch option from the version
+selector entirely. Users can't accidentally try to install from a
+branch ref, which would 404 (see "Why branch tracking is unsupported"
+below).
+
+### Why branch tracking is unsupported
+
+HACS reads `hacs.json` from the **default branch**, not from the
+branch a user is tracking. When `zip_release: true` is set on the
+default branch, HACS expects a zip asset on every install path
+including branch refs. Branch refs have no GitHub Release object, so
+HACS constructs a zip URL that returns 404 — by design, not a bug.
+
+Confirmed by HACS maintainer in
+[hacs/integration#3513](https://github.com/hacs/integration/issues/3513)
+(closed 2024-02-16):
+
+> *"This is correct. It should not be possible. When a repository
+> uses release assets (`zip_release`), only those assets are valid."*
+> — ludeeus, HACS maintainer
+>
+> *"Ask the author if you need a development version. If that was
+> possible before, that was a bug."*
+
+`hide_default_branch: true` is the maintainer-recommended companion:
+HACS hides the branch dropdown from the version selector entirely so
+users don't see the broken path.
+
+For developers who do need to run from a branch (rare — typically
+only the maintainer testing an unreleased commit), install outside
+HACS: clone the repo, symlink `custom_components/cable_modem_monitor`
+into the HA config dir, and `pip install -e` the Core and Catalog
+packages.
+
+References:
+
+- [HACS docs — Publish: Integration](https://hacs.xyz/docs/publish/integration/) — overall integration publishing requirements
+- [HACS docs — Publish: General](https://hacs.xyz/docs/publish/start/) — `zip_release` field documented as "only supported for integrations"
+- [hacs/integration#3513](https://github.com/hacs/integration/issues/3513) — definitive answer on `zip_release` + branch tracking incompatibility
+
 ## Version Numbering
 
 We follow [Semantic Versioning](https://semver.org/):
