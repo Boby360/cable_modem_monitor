@@ -179,22 +179,20 @@ Authoritative doc indexes:
 
 ## Contents
 
-| Section                 | What it covers                                         |
-| ----------------------- | ------------------------------------------------------ |
-| Core Principles         | Architecture, config, specs, quality, testing, process |
-| Code Review Criteria    | See `docs/CODE_REVIEW.md`                              |
-| Pre-Push Verification   | Run `ruff` and `pytest` before pushing                 |
-| Git LFS                 | HAR files in LFS, `load_har_json()`, CI `lfs: true`   |
-| Log Messages            | `[MODEL]` tag convention for modem-specific logs       |
-| Async/Blocking I/O      | Wrap sync I/O in executor for HA                       |
-| Test Patterns           | See `docs/CODE_REVIEW.md`                              |
-| Irreversible Operations | Stop and verify before destructive git ops             |
-| Branch Management       | Rebase over cherry-pick                                |
-| Merge Strategy          | Merge commits for releases, squash for PRs             |
-| Release Process         | See `docs/reference/RELEASING.md`                      |
-| PR and Issue Rules      | No auto-close keywords                                 |
-| Issue Labels            | Label meanings and when to change them                 |
-| Shell Commands          | Avoid permission check triggers                        |
+| Section                       | What it covers                                          |
+| ----------------------------- | ------------------------------------------------------- |
+| Core Principles               | Architecture, config, specs, quality, testing, process  |
+| Diagnosis Discipline          | Asking for the data that distinguishes causes           |
+| Decision Discipline           | Sequencing, no shortcuts, no speculation                |
+| Verification Discipline       | Ground-truth checks before claims                       |
+| Catalog & Data Discipline     | YAML scope, recovery genericity, HAR-first intake       |
+| Code Discipline               | Type-safety, isolation, no infra for hypotheticals      |
+| Shell Command Generation      | Avoid permission-check triggers                         |
+| Pre-Push Verification         | Always run `make validate-ci` before pushing            |
+| Irreversible Operations       | Stop and verify before destructive git ops              |
+| HAR / Logging / Async I/O     | One-line pointers into `docs/CODE_REVIEW.md`            |
+| Branching, Merging, Releases  | Pointer into `docs/reference/RELEASING.md`              |
+| PR and Issue Conventions      | Pointer into `CONTRIBUTING.md`                          |
 
 ## Diagnosis Discipline
 
@@ -222,6 +220,13 @@ propose fixes first.
   dump 6-row tables of "outstanding work." Long synthesized lists
   are too much to absorb in one pass and let shortcuts slip
   through.
+- **Research returns a recommendation, not a paper.** When asked to
+  research, analyze, or assess, default to a 2–3 sentence answer
+  with the single tradeoff that matters. Tables, section headers,
+  ASCII diagrams, and leverage rankings are opt-in — only expand
+  when the user asks "explain why" or "show your work." This rule
+  exists because research prompts repeatedly returned multi-section
+  papers when a recommendation was wanted.
 - **No judgment shortcuts.** Don't dismiss alternatives with
   "overkill," "churn," "make-work," or "no cohesion payoff" without
   weighing real costs and benefits. The shortcut costs more later —
@@ -320,6 +325,14 @@ propose fixes first.
   it probably needs its own module. Spreading wiring across
   `button.py`, `sensor.py`, `coordinator.py`, and `__init__.py`
   for one concern is the smell.
+- **No infrastructure for hypothetical recurrence.** Before adding
+  a test, CI job, hook, script, or module to address a one-shot
+  incident, state the problem in one sentence and ask: am I
+  protecting against documented past failures, or against a
+  hypothetical future one? If hypothetical, name it as such and
+  let the user choose whether to invest. A wrong command in one
+  GitHub comment doesn't justify a smoke test + Make target + CI
+  job; a doc fix or upstream link does.
 - **Small files are fine** when (a) the logic is clearly bounded
   (one concern, one reason to change) and (b) the file has a clear
   docstring explaining what lives there. A 50-line file with one
@@ -398,75 +411,25 @@ which requires HA core source and Docker). Document the exception in
 the Makefile comment so future-you knows why `validate-ci` doesn't
 cover it.
 
-## Git LFS - HAR Test Fixtures
+## HAR Test Fixtures (Git LFS)
 
-HAR captures (`.har` files) are stored in Git LFS. They are write-once
-test fixtures that grow with each new modem.
+`.har` files are stored in Git LFS. CI jobs that read HAR content need
+`lfs: true` on `actions/checkout`. Read HAR files with
+`load_har_json()` — see
+[CODE_REVIEW.md § Loading HAR Fixtures](docs/CODE_REVIEW.md#loading-har-fixtures).
+Local setup: see [GETTING_STARTED.md](docs/setup/GETTING_STARTED.md).
 
-### Loading HAR files
+## Logging
 
-Always use `load_har_json()` from `cable_modem_monitor_core.har`:
+Modem-specific log messages use the `[MODEL]` tag at the end of the
+subject phrase. See
+[CODE_REVIEW.md § Modem-Specific Log Messages](docs/CODE_REVIEW.md#modem-specific-log-messages-model-tag).
 
-```python
-from solentlabs.cable_modem_monitor_core.har import load_har_json
+## Async/Blocking I/O
 
-har_data = load_har_json(path)
-```
-
-**Never use raw `json.loads(path.read_text())`** for HAR files. The
-shared loader detects LFS pointers and attempts `git lfs pull`
-automatically. Without it, missing LFS setup produces opaque
-`JSONDecodeError` instead of actionable guidance.
-
-**Exception:** Standalone scripts that intentionally avoid Core as a
-dependency (e.g., `check_fixture_pii.py`) should inline the check:
-
-```python
-if content.startswith("version https://git-lfs.github.com/spec/v1"):
-    # handle LFS pointer
-```
-
-### CI workflows
-
-Add `lfs: true` to `actions/checkout` in any CI job that reads HAR
-file content (tests, PII checks). Jobs that only lint, validate
-manifests, or check versions do not need it.
-
-### Developer setup
-
-`git-lfs` must be installed before cloning. See
-[Getting Started](docs/setup/GETTING_STARTED.md) for setup instructions.
-
-## Log Messages - [MODEL] Tag
-
-Runtime log messages for a specific modem include the `[MODEL]` tag
-at the end of the subject phrase, before the separator (`:` or `—`):
-
-```python
-_logger.info("Parse complete [%s]: %d DS, %d US", model, ds, us)
-_logger.debug("Fetched /path [%s]: 200 (1234 bytes)", model)
-```
-
-Auth success logging belongs in the **collector**, not in individual
-auth managers — the collector has the model name and logs the
-`AuthResult` centrally.
-
-## Async/Blocking I/O - Home Assistant Event Loop
-
-When calling sync functions from async code (e.g., in `config_flow.py`, `__init__.py`):
-
-1. **Check if the function does I/O** - file reads, network calls, subprocess
-2. **If yes, wrap in executor**: `await hass.async_add_executor_job(sync_func, args)`
-
-```python
-# BAD - blocks event loop
-adapter = get_auth_adapter_for_parser(parser_name)  # reads YAML files
-
-# GOOD - runs in thread pool
-adapter = await hass.async_add_executor_job(get_auth_adapter_for_parser, parser_name)
-```
-
-**Why?** HA will warn at runtime ("Detected blocking call...") but catching it during development is better. Ruff can't detect this when the blocking call is inside another function.
+Wrap blocking I/O in `hass.async_add_executor_job()` when called from
+async code. See
+[CODE_REVIEW.md § No Blocking I/O in Async Context](docs/CODE_REVIEW.md#no-blocking-io-in-async-context).
 
 ## Test Patterns
 
@@ -491,70 +454,18 @@ Examples of irreversible operations requiring verification:
 - Tag deletions
 - Any git operation with `--force`
 
-## Branch Management - Rebase Over Cherry-Pick
+## Branching, Merging, and Releases
 
-When applying a fix to multiple feature branches (e.g., v3.11.0 and v3.12.0):
+Branch flow (rebase over cherry-pick), merge strategy (merge commits
+for release branches → main; squash for small PRs), and release rules
+(tag push triggers publishing; never edit versions manually) all live
+in [`docs/reference/RELEASING.md`](docs/reference/RELEASING.md).
 
-1. **Commit the fix to the base branch first** (e.g., v3.11.0)
-2. **Rebase the child branch** onto the updated parent: `git checkout feature/v3.12.0 && git rebase feature/v3.11.0`
-3. **Force push the rebased branch**: `git push --force-with-lease`
+## PR and Issue Conventions
 
-**Why not cherry-pick?** Cherry-pick creates duplicate commits with different SHAs. When branches merge to main, you get duplicate history or merge conflicts.
-
-**Exception:** Cherry-pick is fine for backporting to unrelated branches (e.g., hotfix to an old release).
-
-## Merge Strategy
-
-### Release branches → main: Use merge commits (not squash)
-
-- Preserves release branch history
-- Child branches rebase cleanly without "skipped commit" noise
-- Shows clear release boundaries in git log
-
-### Small PRs (single feature/fix): Squash merge is fine
-
-- Creates one clean commit on main
-
-## Release Process
-
-See [`docs/reference/RELEASING.md`](docs/reference/RELEASING.md) for
-the full step-by-step release process (beta, stable).
-
-Key rules:
-
-- **CI runs on push. Publishing runs on tag push.** Don't skip the tag.
-- **NEVER manually edit version numbers.** Use `scripts/release.py`.
-- **NEVER run `gh release create` manually.** Let CI handle it.
-- **Dogfood on local HA** before stable releases (user launches, not automated).
-
-## PR and Issue Rules
-
-**NEVER use "Closes #X", "Fixes #X", or similar auto-close keywords.**
-
-- This applies to **both PR bodies AND commit messages**
-- GitHub scans all commit messages in a merge — a `Fixes #X` buried in any commit on the branch will auto-close the issue when merged to main
-- Users should close their own tickets after confirming fixes work
-- Use "Related to #X" or "Addresses #X" instead
-
-## Issue Labels
-
-State labels (`needs-triage`, `in-development`, `needs-testing`,
-`needs-data`, `backlog`) are mutually exclusive — exactly one
-applies. Same for `release:vX.Y` labels. Everything else stacks.
-
-- `needs-triage` — auto-applied; replace with a real state on first read
-- `in-development` — code being written or in an unreleased branch
-- `needs-testing` — released and installable; user can verify now
-- `needs-data` — waiting on user for HAR / diagnostics / clarification
-- `backlog` — acknowledged, not actively prioritized
-
-**Don't apply `needs-testing` until the code is released.** A parser
-on an unreleased branch is `in-development` even when complete.
-
-Apply `release:vX.Y` when the work is committed to that release
-(branch cut, or merged). All `release:vX.Y` descriptions read
-"Tagged for vX.Y."
-
-When a user confirms a modem parser works on real hardware, promote
-the modem per
-[`MODEM_DIRECTORY_SPEC.md`](packages/cable_modem_monitor_core/docs/MODEM_DIRECTORY_SPEC.md#promotion-procedure).
+No auto-close keywords (`Fixes #X`, `Closes #X`, `Resolves #X`) in PR
+bodies *or* commit messages — GitHub scans every commit in a merge.
+Use `Related to #X` / `Addresses #X` instead. Issue label glossary and
+state semantics are in
+[CONTRIBUTING.md § Issue Labels](CONTRIBUTING.md#issue-labels) and
+[CONTRIBUTING.md § Issue Closing Policy](CONTRIBUTING.md#issue-closing-policy).

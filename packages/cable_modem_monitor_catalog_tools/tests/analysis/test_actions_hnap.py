@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from solentlabs.cable_modem_monitor_catalog_tools.analysis.actions import ActionsDetail
+from solentlabs.cable_modem_monitor_catalog_tools.analysis.actions import detect_actions
 from tests._helpers import collect_fixtures, load_fixture
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "actions" / "hnap"
@@ -24,7 +24,7 @@ HNAP_FIXTURES = collect_fixtures(FIXTURES_DIR)
 def test_hnap_action_presence(fixture_path: Path) -> None:
     """Correct action presence/absence for each HNAP fixture."""
     data = load_fixture(fixture_path)
-    result = ActionsDetail.detect(data["_entries"], "hnap")
+    result = detect_actions(data["_entries"], "hnap")
     assert (result.logout is not None) == (data["_expected_logout"] is not None)
     assert (result.restart is not None) == (data["_expected_restart"] is not None)
 
@@ -37,7 +37,7 @@ def test_hnap_action_presence(fixture_path: Path) -> None:
 def test_hnap_logout_details(fixture_path: Path) -> None:
     """HNAP logout details match fixture expectations."""
     data = load_fixture(fixture_path)
-    result = ActionsDetail.detect(data["_entries"], "hnap")
+    result = detect_actions(data["_entries"], "hnap")
     expected = data["_expected_logout"]
     assert result.logout is not None
     assert result.logout.type == expected["type"]
@@ -57,7 +57,7 @@ def test_hnap_logout_details(fixture_path: Path) -> None:
 def test_hnap_restart_details(fixture_path: Path) -> None:
     """HNAP restart details match fixture expectations."""
     data = load_fixture(fixture_path)
-    result = ActionsDetail.detect(data["_entries"], "hnap")
+    result = detect_actions(data["_entries"], "hnap")
     expected = data["_expected_restart"]
     assert result.restart is not None
     assert result.restart.type == expected["type"]

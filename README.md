@@ -20,7 +20,10 @@
 
 A custom Home Assistant integration that monitors cable modem signal quality, power levels, and error rates. Perfect for tracking your internet connection health and identifying potential issues before they cause problems.
 
-<img src="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/dashboard-screenshot.png" alt="Cable Modem Health Dashboard" width="500">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/dashboard-screenshot-dark.png">
+  <img src="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/dashboard-screenshot.png" alt="Cable Modem Health Dashboard" width="500">
+</picture>
 
 Monitor your cable modem's signal quality, errors, and connection health in real-time.
 
@@ -63,7 +66,7 @@ Monitor your cable modem's signal quality, errors, and connection health in real
 
 - 🔄 **Remote Control**: Restart your modem from Home Assistant
 - 🤖 **Automation Ready**: Trigger actions on signal degradation or errors
-- 🔐 **Privacy First**: All local processing, automatic PII sanitization
+- 🔐 **Local-Only**: All processing on your Home Assistant instance — no cloud services
 - 🛡️ **Security Focused**: CodeQL scanned on every push, weekly schedule, and PR
 - 🔌 **Plug & Play**: Easy UI configuration, no YAML editing needed
 
@@ -72,22 +75,34 @@ Monitor your cable modem's signal quality, errors, and connection health in real
 Track your cable modem's health with comprehensive dashboards and real-time monitoring:
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/downstream-power-levels.png" alt="Downstream Power Levels" width="500"><br>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/downstream-power-levels-dark.png">
+    <img src="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/downstream-power-levels.png" alt="Downstream Power Levels" width="500">
+  </picture><br>
   <em>Real-time power level monitoring across all downstream channels</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/signal-to-noise-ratio.png" alt="Signal-to-Noise Ratio" width="500"><br>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/signal-to-noise-ratio-dark.png">
+    <img src="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/signal-to-noise-ratio.png" alt="Signal-to-Noise Ratio" width="500">
+  </picture><br>
   <em>SNR tracking helps identify signal quality issues before they cause problems</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/latency.png" alt="Modem Latency Monitoring" width="500"><br>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/latency-dark.png">
+    <img src="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/latency.png" alt="Modem Latency Monitoring" width="500">
+  </picture><br>
   <em>Ping and HTTP latency monitoring for real-time health assessment</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/corrected_errors.png" alt="Corrected Errors" width="500"><br>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/corrected-errors-dark.png">
+    <img src="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/corrected-errors.png" alt="Corrected Errors" width="500">
+  </picture><br>
   <em>Track corrected errors over time to spot developing line issues</em>
 </p>
 
@@ -169,9 +184,33 @@ To return to stable: repeat the steps and pick the latest stable release.
 
 1. Go to **Settings → Devices & Services → Add Integration**
 2. Search for **Cable Modem Monitor**
-3. Enter your modem's IP address (typically `192.168.100.1`)
-4. Select your modem manufacturer, then pick your specific model from the catalog
-5. Choose Channel Number mode (recommended — stable entity IDs across reboots) or Channel ID mode
+3. Pick a manufacturer (or **All** to see every catalog entry)
+4. Select your modem model and choose Channel Number mode (recommended — stable entity IDs across reboots) or Channel ID mode
+5. Enter your modem's IP address (typically `192.168.100.1`) and credentials if required
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/setup-step1-manufacturer-dark.png">
+    <img src="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/setup-step1-manufacturer.png" alt="Setup step 1: pick a manufacturer" width="420">
+  </picture><br>
+  <em>Step 3 — Pick a manufacturer (or All)</em>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/setup-step2-modem-dark.png">
+    <img src="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/setup-step2-modem.png" alt="Setup step 2: select modem and channel naming" width="420">
+  </picture><br>
+  <em>Step 4 — Select your modem and channel naming</em>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/setup-step3-connection-dark.png">
+    <img src="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/setup-step3-connection.png" alt="Setup step 3: connection details" width="420">
+  </picture><br>
+  <em>Step 5 — Enter connection details</em>
+</p>
 
 ### Options
 
@@ -183,6 +222,13 @@ After setup, configure via **Settings → Devices & Services → Cable Modem Mon
 - **Health Check Interval**: How often to run lightweight reachability probes (default depends on probe support: 30 seconds with ICMP/HEAD, 60 seconds with HTTP-GET only)
 
 Channel Identity and Modem Model are install-time choices. To change either, remove the integration and add it again.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/cable-modem-settings-dark.png">
+    <img src="https://raw.githubusercontent.com/solentlabs/cable_modem_monitor/main/images/cable-modem-settings.png" alt="Cable Modem Settings dialog" width="420">
+  </picture>
+</p>
 
 ---
 
@@ -324,12 +370,10 @@ Please see the [Contributing Guide](./CONTRIBUTING.md) for details on how to add
 
 ### Privacy Protection
 
-- **100% Local**: All data stays on your Home Assistant instance - no cloud services
-- **Read-Only**: Only reads data from your modem (never modifies configuration)
-- **PII Sanitization**: Automatic removal of sensitive data from diagnostics
-  - IP addresses, MAC addresses, serial numbers automatically redacted
-  - Safe to share diagnostic files for support
-  - Uses [har-capture](https://github.com/solentlabs/har-capture) for secure HAR file sanitization
+- **100% Local**: All data stays on your Home Assistant instance — no cloud services
+- **Read-Only by Default**: Only reads data from your modem; the only write action is a user-invoked restart
+- **Diagnostic Logs**: Private IPs (RFC1918) and filesystem paths are scrubbed from log lines included in the diagnostics file. Modem identity (model, firmware, channel data) is included verbatim — review before sharing publicly. The diagnostics file embeds a `_review_before_sharing` checklist to help you spot anything sensitive
+- **HAR Captures**: When onboarding a new modem, [har-capture](https://github.com/solentlabs/har-capture) sanitizes HAR files (passwords, tokens, MACs) before you submit them
 - **Secure Credentials**: Stored in Home Assistant's encrypted storage
 
 ### Security Features

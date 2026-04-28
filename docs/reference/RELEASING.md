@@ -11,6 +11,14 @@ Releases follow a PR-based workflow:
 3. **Merge to main** → Creates clean history
 4. **Tag main** → Triggers GitHub release workflow
 
+## Key Rules
+
+- **CI runs on push. Publishing runs on tag push.** Don't skip the tag.
+- **Never manually edit version numbers.** Use `scripts/release.py`.
+- **Never run `gh release create` manually.** Let CI handle it.
+- **Dogfood on local HA** before stable releases (maintainer launches,
+  not automated).
+
 ## Step-by-Step Release
 
 ### 1. Prepare the Release (on feature branch)
@@ -184,6 +192,33 @@ We follow [Semantic Versioning](https://semver.org/):
 - **MAJOR** (X.0.0): Breaking changes
 - **MINOR** (0.X.0): New features, backward compatible
 - **PATCH** (0.0.X): Bug fixes, backward compatible
+
+## Branching and Merging
+
+### Applying a fix to multiple feature branches: rebase, don't cherry-pick
+
+When the same fix needs to land on multiple in-flight feature branches
+(e.g., v3.11.0 and v3.12.0):
+
+1. Commit the fix to the base branch first (e.g., v3.11.0).
+2. Rebase the child branch onto the updated parent:
+   `git checkout feature/v3.12.0 && git rebase feature/v3.11.0`
+3. Force push the rebased branch: `git push --force-with-lease`
+
+Cherry-picking creates duplicate commits with different SHAs; when the
+branches eventually merge to main, you get duplicate history or merge
+conflicts. The exception is backporting to *unrelated* branches (e.g.,
+a hotfix into an older release line) — cherry-pick is fine there.
+
+### Release branches → main: merge commits, not squash
+
+- Preserves release branch history.
+- Child branches rebase cleanly without "skipped commit" noise.
+- Shows clear release boundaries in `git log`.
+
+### Small single-feature/fix PRs: squash merge is fine
+
+Creates one clean commit on main.
 
 ## Hotfix Releases
 

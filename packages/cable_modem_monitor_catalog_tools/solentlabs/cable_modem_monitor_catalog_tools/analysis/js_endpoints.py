@@ -83,9 +83,10 @@ _URL_GROUP: dict[re.Pattern[str], int] = {
     _JQUERY_SHORTHAND: 2,
 }
 
-# Inline <script> block extraction
+# Inline <script> block extraction.  Allow whitespace before the
+# closing > of the end tag (HTML allows </script > and similar).
 _SCRIPT_BLOCK = re.compile(
-    r"<script[^>]*>(.*?)</script>",
+    r"<script[^>]*>(.*?)</script\s*>",
     re.DOTALL | re.IGNORECASE,
 )
 

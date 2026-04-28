@@ -260,6 +260,27 @@ Add support for Arris TG1682G modem
 - All existing tests still pass
 ```
 
+## Issue Labels
+
+State labels (`needs-triage`, `in-development`, `needs-testing`,
+`needs-data`, `backlog`) are mutually exclusive — exactly one
+applies. Same for `release:vX.Y` labels. Everything else stacks.
+
+- `needs-triage` — auto-applied; replaced with a real state on first read
+- `in-development` — code being written or in an unreleased branch
+- `needs-testing` — released and installable; user can verify now
+- `needs-data` — waiting on user for HAR / diagnostics / clarification
+- `backlog` — acknowledged, not actively prioritized
+
+`needs-testing` is not applied until the code is released. A parser on
+an unreleased branch is `in-development` even when complete. Apply
+`release:vX.Y` when the work is committed to that release (branch cut,
+or merged); all `release:vX.Y` descriptions read "Tagged for vX.Y."
+
+When a user confirms a modem parser works on real hardware, the modem
+is promoted per the
+[promotion procedure in MODEM_DIRECTORY_SPEC.md](packages/cable_modem_monitor_core/docs/MODEM_DIRECTORY_SPEC.md#promotion-procedure).
+
 ## Release Process
 
 Maintainers handle releases following semantic versioning. See
