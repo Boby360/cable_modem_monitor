@@ -1,4 +1,12 @@
-.PHONY: help test test-quick test-simple clean lint lint-fix fix-imports lint-all type-check format format-check check validate validate-ci validate-host intake-regression pii-check catalog-readme-check docker-start docker-stop docker-restart docker-logs docker-status docker-clean docker-shell
+.PHONY: help test test-quick test-simple clean lint lint-fix fix-imports lint-all type-check format format-check check validate validate-ci validate-host intake-regression pii-check catalog-readme-check install-hooks docker-start docker-stop docker-restart docker-logs docker-status docker-clean docker-shell
+
+# Pin tool invocations to the project venv so that subprocesses
+# without venv on PATH (release.py shelling out, fresh clones, CI
+# subshells) get the project-pinned versions instead of whatever
+# the system happens to have. The `test:` target already venv-
+# resolves via scripts/dev/run_tests_local.sh; this keeps lint,
+# type-check, and format consistent with that.
+VENV_BIN := .venv/bin
 
 # Default target - show help
 help:
@@ -22,6 +30,7 @@ help:
 	@echo "  make quick-check  - Quick checks (lint + format, skip type-check)"
 	@echo "  make validate-host - Cross-platform validation (auto-installs tools)"
 	@echo "  make validate-ci   - Full CI-like validation (lint + tests)"
+	@echo "  make install-hooks - Install optional pre-push hook (runs validate-ci)"
 	@echo ""
 	@echo "Docker Development:"
 	@echo "  make docker-start   - Start Home Assistant dev environment"
@@ -54,27 +63,27 @@ clean:
 # Run linter
 lint:
 	@echo "Running Ruff linter..."
-	@ruff check .
+	@$(VENV_BIN)/ruff check .
 
 # Run linter with auto-fix
 lint-fix:
 	@echo "Running Ruff linter with auto-fix..."
-	@ruff check --fix .
+	@$(VENV_BIN)/ruff check --fix .
 
 # Type checking
 type-check:
 	@echo "Running mypy type checker..."
-	@mypy .
+	@$(VENV_BIN)/mypy .
 
 # Format code
 format:
 	@echo "Formatting code with Black..."
-	@black .
+	@$(VENV_BIN)/black .
 
 # Check code formatting without modifying
 format-check:
 	@echo "Checking code formatting..."
-	@black --check .
+	@$(VENV_BIN)/black --check .
 
 # Run all code quality checks
 check: lint format-check type-check
@@ -115,17 +124,17 @@ validate-ci: check test intake-regression pii-check catalog-readme-check
 # Intake pipeline accuracy regression — mirrors CI test-packages step.
 intake-regression:
 	@echo "🔍 Running intake pipeline regression..."
-	@python packages/cable_modem_monitor_catalog_tools/scripts/intake_pipeline_regression.py
+	@$(VENV_BIN)/python packages/cable_modem_monitor_catalog_tools/scripts/intake_pipeline_regression.py
 
 # Fixture PII / credential scan — mirrors CI pii-check job.
 pii-check:
 	@echo "🔍 Scanning fixtures for PII..."
-	@python packages/cable_modem_monitor_catalog/scripts/check_fixture_pii.py
+	@$(VENV_BIN)/python packages/cable_modem_monitor_catalog/scripts/check_fixture_pii.py
 
 # Catalog README freshness — mirrors CI catalog-readme job.
 catalog-readme-check:
 	@echo "🔍 Checking catalog README is up to date..."
-	@python packages/cable_modem_monitor_catalog/scripts/generate_catalog_index.py --print > /tmp/catalog_readme.md
+	@$(VENV_BIN)/python packages/cable_modem_monitor_catalog/scripts/generate_catalog_index.py --print > /tmp/catalog_readme.md
 	@if ! diff -q packages/cable_modem_monitor_catalog/README.md /tmp/catalog_readme.md > /dev/null 2>&1; then \
 		echo "❌ Catalog README is out of date."; \
 		echo "   Run: python packages/cable_modem_monitor_catalog/scripts/generate_catalog_index.py"; \
@@ -133,6 +142,15 @@ catalog-readme-check:
 		exit 1; \
 	fi
 	@echo "✅ Catalog README is up to date"
+
+# Install optional pre-push hook that runs `make validate-ci` before push.
+# Opt-in per developer — CI is the authoritative gate. To bypass once:
+#   git push --no-verify
+install-hooks:
+	@HOOKS_DIR="$$(git rev-parse --git-path hooks)"; \
+	cp scripts/hooks/pre-push "$$HOOKS_DIR/pre-push"; \
+	chmod +x "$$HOOKS_DIR/pre-push"; \
+	echo "✅ Installed pre-push hook → $$HOOKS_DIR/pre-push"
 
 # Cross-platform validation (auto-installs tools, works without venv)
 validate-host:

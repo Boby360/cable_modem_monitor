@@ -396,6 +396,21 @@ workflow exercises. If `make validate-ci` is green, CI will be green.
 staged files, and `make test` is a subset of CI. `make validate-ci`
 is the only command guaranteed to mirror CI exactly.
 
+### Optional pre-push hook — opt-in, suggest at the right moment
+
+`make install-hooks` installs an opt-in `.git/hooks/pre-push` that
+runs `make validate-ci` automatically before every push (chained
+after `git lfs pre-push`). It is not committed-by-default — CI is the
+authoritative gate, and forcing the hook on every developer would
+create install-state inconsistency without adding any enforcement CI
+doesn't already provide.
+
+**When to suggest it**: after a developer hits a CI failure that
+`make validate-ci` would have caught locally (coverage drop, lint
+miss, missing local-mirror), suggest `make install-hooks` *once*. Do
+not repeat the suggestion if they decline, and do not suggest it on
+fresh clones or on every validate-ci run — that becomes noise.
+
 ### Adding a new CI job — local-mirror rule
 
 **Whenever you add a new job or step to `.github/workflows/tests.yml`,
