@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_comment": "Team-shared Claude Code config. The Read deny below blocks Claude from reading test-ha-config/.storage/, which contains live modem credentials in plaintext (Home Assistant stores config-entry data unencrypted on disk by design). Without this, credentials can leak into the Claude conversation context, which may be transmitted, retained, or accidentally included in commits/PRs/issues. CLAUDE.md rule 28 covers the broader behavioral case (Bash readers, etc.); this rule is the harness-level hard backstop for the Read tool.",
+  "permissions": {
+    "deny": [
+      "Read(test-ha-config/.storage/**)"
+    ]
+  }
+}

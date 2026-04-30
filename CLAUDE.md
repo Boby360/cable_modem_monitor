@@ -164,6 +164,17 @@ wins over convenience.
     to test," "if it works, please post diagnostics." Only claim
     "fixed" after the user confirms on their hardware.
 
+28. **Never read the HA test config `.storage` directory.** The path
+    is denied in `.claude/settings.json` (`permissions.deny`) and
+    mounted under the `/config` volume in `docker-compose.test.yml`.
+    It contains live modem credentials in plaintext (HA stores
+    config-entry data unencrypted on disk by design). Reading it via
+    any tool — Read, `cat`, `grep`, `rg`, `jq`, `awk`,
+    `python -c "open()"` — leaks the password into the conversation
+    context. The settings.json deny only blocks the Read tool; this
+    rule covers the rest. If you need config-entry fields for
+    analysis, ask the user to paste a redacted excerpt.
+
 ## Architecture and Specifications
 
 Authoritative doc indexes:
