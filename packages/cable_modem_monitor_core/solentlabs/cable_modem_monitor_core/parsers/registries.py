@@ -6,6 +6,17 @@ format types and six system info source types are registered.
 Channel parsers: ``(section, resources) -> list[dict]``
 System info parsers: ``(source, resources) -> dict``
 
+The ``CHANNEL_PARSERS`` and ``SYSINFO_PARSERS`` dicts derive from
+the central format-model lists (``CHANNEL_SECTION_MODELS`` and
+``SYSTEM_INFO_SOURCE_MODELS``) by joining each model with its wrapper
+in the per-tag tables below. Adding a format means:
+
+1. Define the model with its ``format_tag``/``decode_kind``/
+   ``transports`` ClassVars and append it to the appropriate model
+   list in ``models/parser_config/``.
+2. Define the wrapper here and add an entry to
+   ``_CHANNEL_WRAPPERS_BY_TAG`` (or the sysinfo equivalent).
+
 See PARSING_SPEC.md Parser Registry section.
 """
 
@@ -14,11 +25,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from ..models.parser_config.hnap import HNAPSection
+from ..models.parser_config.config import CHANNEL_SECTION_MODELS
 from ..models.parser_config.javascript import JSEmbeddedSection
 from ..models.parser_config.js_json import JSJsonSection
 from ..models.parser_config.json_format import JSONSection
+from ..models.parser_config.json_transposed import JSONTransposedSection
 from ..models.parser_config.system_info import (
+    SYSTEM_INFO_SOURCE_MODELS,
     HNAPSystemInfoSource,
     HTMLFieldsSource,
     JSONSystemInfoSource,
@@ -40,6 +53,7 @@ from .formats.js_system_info import JSSystemInfoParser
 from .formats.js_vars import JSVarsParser
 from .formats.json_parser import JSONParser
 from .formats.json_system_info import JSONSystemInfoParser
+from .formats.json_transposed import JSONTransposedParser
 from .formats.xml_parser import XMLChannelParser
 from .formats.xml_system_info import XMLSystemInfoParser
 
@@ -225,15 +239,45 @@ def _parse_xml_channels(
     return channels
 
 
-# Maps section config type -> parser callable(section, resources) -> list[dict]
+def _parse_json_transposed_channels(
+    section: JSONTransposedSection,
+    resources: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Parse channels from a JSONTransposedParser section."""
+    parser = JSONTransposedParser(section)
+    channels = parser.parse(resources)
+    if not isinstance(channels, list):
+        return []
+
+    # Auto-assign channel_number from 1-based row position when not
+    # already mapped by parser.yaml.  See CHANNEL_IDENTIFICATION_SPEC §10.
+    for idx, channel in enumerate(channels, start=1):
+        if "channel_number" not in channel:
+            channel["channel_number"] = idx
+
+    return channels
+
+
+# Wrappers keyed by format_tag. Combined with CHANNEL_SECTION_MODELS
+# below to build CHANNEL_PARSERS — preserves locality (wrapper lives
+# next to its peers) while removing the duplicated model→callable
+# table.
+_CHANNEL_WRAPPERS_BY_TAG: dict[str, Callable[..., list[dict[str, Any]]]] = {
+    "table": _parse_html_table_channels,
+    "table_transposed": _parse_transposed_channels,
+    "javascript": _parse_js_embedded_channels,
+    "javascript_json": _parse_js_json_channels,
+    "hnap": _parse_hnap_channels,
+    "json": _parse_json_channels,
+    "json_transposed": _parse_json_transposed_channels,
+    "xml": _parse_xml_channels,
+}
+
+# Maps section config type -> parser callable(section, resources) -> list[dict].
+# Built by joining the central model list with the wrapper table — a
+# missing wrapper for a registered model raises at import time.
 CHANNEL_PARSERS: dict[type, Callable[..., list[dict[str, Any]]]] = {
-    HTMLTableSection: _parse_html_table_channels,
-    HNAPSection: _parse_hnap_channels,
-    HTMLTableTransposedSection: _parse_transposed_channels,
-    JSEmbeddedSection: _parse_js_embedded_channels,
-    JSJsonSection: _parse_js_json_channels,
-    JSONSection: _parse_json_channels,
-    XMLSection: _parse_xml_channels,
+    model: _CHANNEL_WRAPPERS_BY_TAG[model.format_tag] for model in CHANNEL_SECTION_MODELS
 }
 
 
@@ -302,14 +346,20 @@ def _parse_xml_sysinfo(
     return result if isinstance(result, dict) else {}
 
 
-# Maps source config type -> parser callable(source, resources) -> dict
+# Wrappers keyed by format_tag. Combined with SYSTEM_INFO_SOURCE_MODELS
+# below to build SYSINFO_PARSERS.
+_SYSINFO_WRAPPERS_BY_TAG: dict[str, Callable[..., dict[str, Any]]] = {
+    "html_fields": _parse_html_fields_sysinfo,
+    "hnap": _parse_hnap_sysinfo,
+    "javascript": _parse_js_sysinfo,
+    "javascript_vars": _parse_js_vars_sysinfo,
+    "json": _parse_json_sysinfo,
+    "xml": _parse_xml_sysinfo,
+}
+
+# Maps source config type -> parser callable(source, resources) -> dict.
 SYSINFO_PARSERS: dict[type, Callable[..., dict[str, Any]]] = {
-    HTMLFieldsSource: _parse_html_fields_sysinfo,
-    HNAPSystemInfoSource: _parse_hnap_sysinfo,
-    JSSystemInfoSource: _parse_js_sysinfo,
-    JSVarsSystemInfoSource: _parse_js_vars_sysinfo,
-    JSONSystemInfoSource: _parse_json_sysinfo,
-    XMLSystemInfoSource: _parse_xml_sysinfo,
+    model: _SYSINFO_WRAPPERS_BY_TAG[model.format_tag] for model in SYSTEM_INFO_SOURCE_MODELS
 }
 
 

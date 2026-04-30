@@ -415,6 +415,35 @@ parser.yaml config field.
 pre-fetched resources are available. parser.py never contains auth
 or metadata. modem.yaml never contains extraction logic.
 
+### Promoting `_transpose_nodes` to a Core format
+
+**Decision:** The indexed-pivot JSON shape (`name` + `indexN` rows,
+each column a channel) was promoted from `dm1000/parser.py` into a
+Core format (`json_transposed`) plus a public
+`transpose_indexed_rows` helper. dm1000's `parser.py` keeps the
+firmware-specific filter (`Power == "ON"` and `"OPERATE" in STATE`)
+and the OFDMA channel build, but no longer owns the pivot.
+
+**Rationale:** A valid HAR capture is enough to ground-truth a
+parser format — the captured payload either matches the new format's
+output for a given config or it doesn't. That's a different bar than
+auth promotion, where end-to-end verification against a live modem
+is required because failure modes (challenge replay, cookie
+binding, anti-CSRF) only surface against running firmware. We
+expect more sercomm-family modems to land with this same indexed-row
+shape, and "leave the helper in dm1000 until the second consumer"
+forces that contributor to refactor instead of just adding a
+parser.yaml. The promotion cost is one model + one parser + registry
+wiring — paid once, amortized across future modems.
+
+**Constrains:** The format owns the pivot, type conversion,
+`channel_type`, and `filter`. Firmware-specific quirks that aren't
+expressible declaratively (substring filters, stateful gating) stay
+in `parser.py` and import `transpose_indexed_rows` from the curated
+`post_processor_helpers` module to share the pivot logic. New filter
+operators added to handle such quirks should land as separate,
+additive ADRs — not bundled with format promotions.
+
 ### Companion tables merge via config, not code
 
 **Decision:** The `merge_by` field on `tables[]` entries tells the
@@ -709,9 +738,72 @@ No registration. No changes to Core or Catalog package code. Drop-in.
 
 ### How to add a format
 
-Add a `BaseParser` implementation in Core. Add the format string to
-the valid formats list. Update validators. Existing modem
-configs and tests are untouched.
+Each format is described in **one place** — the section/source model
+— via three ``ClassVar``s. Loaders, validators, and parser registries
+all derive from the model lists; adding a format does not require
+editing format-list frozensets in multiple files.
+
+1. **`models/parser_config/{format}.py`** — define the model with:
+   - `format_tag: ClassVar[str]` — value of ``format:`` in parser.yaml
+   - `decode_kind: ClassVar[DecodeKind]` — `"html"`, `"json"`, `"xml"`,
+     or `"hnap"` (drives the loader's body decoder and login-page
+     detection)
+   - `transports: ClassVar[frozenset[str]]` — which transports may
+     select this format (drives cross-file transport/format validation)
+   - The familiar Pydantic schema (`model_config`, `format: Literal["..."]`,
+     fields)
+2. **`models/parser_config/config.py`** (channel sections) **or**
+   **`system_info.py`** (system_info sources) — append the model class
+   to the list (`CHANNEL_SECTION_MODELS` or
+   `SYSTEM_INFO_SOURCE_MODELS`). The discriminated union, the loader's
+   decode dispatch, and the cross-file validator's transport map all
+   derive from these lists.
+3. **`parsers/formats/{format}.py`** — implement the `BaseParser`
+   subclass.
+4. **`parsers/registries.py`** — define the wrapper that adapts the
+   parser to `(section, resources) -> list[dict]` (or `dict` for
+   sysinfo) and add a `format_tag → wrapper` entry to
+   `_CHANNEL_WRAPPERS_BY_TAG` (or `_SYSINFO_WRAPPERS_BY_TAG`). The
+   model→callable dict is built by zipping the registry list with
+   this table — a missing entry raises at import time.
+
+**Why ClassVars on the model.** Auth strategies already use this
+pattern (`AuthStrategyBase` with `display_name`/`transport` ClassVars
++ `_AUTH_MODELS` list). Format metadata is the same shape: a few
+attributes that cross-cutting machinery needs to know about. Putting
+them on the model keeps everything about a format colocated and lets
+the loader, validator, and registry derive their views.
+
+**Why wrappers stay in `registries.py`.** The wrappers contain
+format-specific orchestration (channel_number assignment, multi-table
+`merge_by`, unified-channel handling) that doesn't fit cleanly into
+the BaseParser interface. Pulling them into format modules would
+spread orchestration across N files; keeping them in `registries.py`
+keeps that policy in one place. The `_CHANNEL_WRAPPERS_BY_TAG` dict
+is the only per-format addition outside the model.
+
+### Curated public-helper surface for parser.py
+
+**Decision:** ``parser.py`` PostProcessors that need shared logic from
+Core import it from a single curated module —
+``solentlabs.cable_modem_monitor_core.post_processor_helpers`` — and
+nothing else. The parser-sandbox validator allowlists this exact
+fully-qualified module path; all other Core paths remain forbidden.
+
+**Rationale:** The sandbox is what keeps PostProcessors honest (no
+network I/O, no auth state access, no orchestrator peeking). Allowing
+unrestricted Core imports defeats it; banning all Core imports forces
+DRY violations when a primitive (e.g., `transpose_indexed_rows`) is
+useful both in a Core format and in a firmware-quirk PostProcessor.
+A single audited public surface threads the needle: helpers added
+there are reviewed for parser.py safety, and the sandbox enforces
+that no other Core path can be reached.
+
+**Constrains:** Adding a helper means importing/defining it in
+`post_processor_helpers.py` and listing it in `__all__`. Renaming or
+removing one is a breaking change for catalog `parser.py` files —
+keep churn low. Helpers that need network or stateful orchestrator
+access do not belong here.
 
 ### How to add an auth strategy
 

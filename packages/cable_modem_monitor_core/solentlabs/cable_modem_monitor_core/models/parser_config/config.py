@@ -6,15 +6,19 @@ declarations into a unified config.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from functools import reduce
+from operator import or_
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, model_validator
 
+from .format_registry import FormatModel
 from .hnap import HNAPSection
 from .javascript import JSEmbeddedSection
 from .js_json import JSJsonSection
 from .json_format import JSONSection
-from .system_info import SystemInfoSection
+from .json_transposed import JSONTransposedSection
+from .system_info import SYSTEM_INFO_SOURCE_MODELS, SystemInfoSection
 from .table import HTMLTableSection
 from .transposed import HTMLTableTransposedSection
 from .xml_format import XMLSection
@@ -27,16 +31,57 @@ def _get_section_format(data: Any) -> str:
     return str(getattr(data, "format", ""))
 
 
-ChannelSection = Annotated[
-    Annotated[HTMLTableSection, Tag("table")]
-    | Annotated[HTMLTableTransposedSection, Tag("table_transposed")]
-    | Annotated[JSEmbeddedSection, Tag("javascript")]
-    | Annotated[JSJsonSection, Tag("javascript_json")]
-    | Annotated[HNAPSection, Tag("hnap")]
-    | Annotated[JSONSection, Tag("json")]
-    | Annotated[XMLSection, Tag("xml")],
-    Discriminator(_get_section_format),
+# Single source of truth for channel-section format metadata.
+# Adding a format = define the model with its ClassVars and append
+# here. The discriminated union below, the loader's decode dispatch,
+# the cross-file validator, and the parser registry all derive from
+# this list (combined with SYSTEM_INFO_SOURCE_MODELS where relevant).
+#
+# The static ChannelSection alias (visible to mypy/Pyright via the
+# TYPE_CHECKING block below) must enumerate the same models in the
+# same order. ``test_channel_section_registry_alignment`` enforces
+# this — the static alias and the runtime list cannot drift.
+CHANNEL_SECTION_MODELS: list[type[FormatModel]] = [
+    HTMLTableSection,
+    HTMLTableTransposedSection,
+    JSEmbeddedSection,
+    JSJsonSection,
+    HNAPSection,
+    JSONSection,
+    JSONTransposedSection,
+    XMLSection,
 ]
+
+# Combined registry — every parser-format model in the system.
+# Loaders and cross-cutting validators iterate this; per-section
+# behaviour iterates the section list alone.
+ALL_FORMAT_MODELS: list[type[FormatModel]] = [
+    *CHANNEL_SECTION_MODELS,
+    *SYSTEM_INFO_SOURCE_MODELS,
+]
+
+
+if TYPE_CHECKING:
+    # Static type alias for type-checkers (mypy/Pyright cannot infer a
+    # union built at runtime from a registry list). Must mirror
+    # CHANNEL_SECTION_MODELS exactly — drift is caught by the
+    # alignment test.
+    ChannelSection = Annotated[
+        Annotated[HTMLTableSection, Tag("table")]
+        | Annotated[HTMLTableTransposedSection, Tag("table_transposed")]
+        | Annotated[JSEmbeddedSection, Tag("javascript")]
+        | Annotated[JSJsonSection, Tag("javascript_json")]
+        | Annotated[HNAPSection, Tag("hnap")]
+        | Annotated[JSONSection, Tag("json")]
+        | Annotated[JSONTransposedSection, Tag("json_transposed")]
+        | Annotated[XMLSection, Tag("xml")],
+        Discriminator(_get_section_format),
+    ]
+else:
+    ChannelSection = Annotated[
+        reduce(or_, (Annotated[m, Tag(m.format_tag)] for m in CHANNEL_SECTION_MODELS)),
+        Discriminator(_get_section_format),
+    ]
 
 
 class AggregateField(BaseModel):

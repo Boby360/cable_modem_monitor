@@ -15,17 +15,19 @@ from enum import StrEnum
 
 from ..models.modem_config import ModemConfig
 from ..models.parser_config import ParserConfig
+from ..models.parser_config.config import ALL_FORMAT_MODELS
+from ..models.parser_config.format_registry import format_tags_for_transport
 from ..models.parser_config.system_info import (
     JSSystemInfoSource,
     SystemInfoSection,
     XMLSystemInfoSource,
 )
 
-# Formats valid per transport (same constraint table as MODEM_YAML_SPEC)
+# Formats valid per transport — derived from the central registry.
+# Adding a format with new transport coverage updates this without
+# editing this file. See MODEM_YAML_SPEC.md transport-format table.
 _VALID_FORMATS: dict[str, frozenset[str]] = {
-    "cbn": frozenset({"xml"}),
-    "hnap": frozenset({"hnap"}),
-    "http": frozenset({"table", "table_transposed", "html_fields", "javascript", "javascript_json", "json"}),
+    transport: format_tags_for_transport(transport, ALL_FORMAT_MODELS) for transport in ("cbn", "hnap", "http")
 }
 
 

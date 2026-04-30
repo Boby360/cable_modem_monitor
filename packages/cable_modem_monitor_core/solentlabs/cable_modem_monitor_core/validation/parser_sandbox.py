@@ -29,8 +29,9 @@ class SandboxViolation:
         return f"{self.line}:{self.col} — {self.message}"
 
 
-# Whitelist of modules that parser.py is allowed to import.
-# Any import outside this list is a sandbox violation.
+# Whitelist of top-level modules that parser.py is allowed to import.
+# Any import outside this list is a sandbox violation, except for the
+# fully-qualified Core-public helpers in ALLOWED_FULL_MODULES below.
 # __future__ is always allowed (syntax/behavior changes, not runtime).
 ALLOWED_MODULES = frozenset(
     {
@@ -44,6 +45,17 @@ ALLOWED_MODULES = frozenset(
         "collections",
         "functools",
         "itertools",
+    }
+)
+
+# Fully-qualified Core module paths that parser.py may import. This
+# is the ONLY way for parser.py to consume Core code — every entry
+# is a deliberate, audited public-helper surface. See
+# ``post_processor_helpers.py`` for the conventions when adding a
+# helper.
+ALLOWED_FULL_MODULES = frozenset(
+    {
+        "solentlabs.cable_modem_monitor_core.post_processor_helpers",
     }
 )
 
@@ -81,6 +93,9 @@ class _ParserSandboxValidator(ast.NodeVisitor):
             return
 
         if node.module:
+            if node.module in ALLOWED_FULL_MODULES:
+                self.generic_visit(node)
+                return
             name = node.module.split(".")[0]
             if name not in ALLOWED_MODULES:
                 self._add_violation(

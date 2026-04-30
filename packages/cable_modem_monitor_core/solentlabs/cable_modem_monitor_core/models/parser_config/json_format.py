@@ -9,11 +9,12 @@ used by XMLSection. Per PARSING_SPEC.md JSONParser section.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .common import ChannelTypeConfig, FilterValue, JsonChannelMapping
+from .format_registry import DecodeKind
 
 
 class JSONArrayDefinition(BaseModel):
@@ -39,6 +40,10 @@ class JSONSection(BaseModel):
     Supports flat form (array_path + fields at top level) or
     multi-array form (arrays list). Mutually exclusive.
     """
+
+    format_tag: ClassVar[str] = "json"
+    decode_kind: ClassVar[DecodeKind] = "json"
+    transports: ClassVar[frozenset[str]] = frozenset({"http"})
 
     model_config = ConfigDict(extra="forbid")
     format: Literal["json"]

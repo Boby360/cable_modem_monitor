@@ -1144,7 +1144,7 @@ rules below.
 
 | Transport | Valid auth strategies | Valid session | Valid formats | Valid action types |
 |-----------|---------------------|--------------|---------------|-------------------|
-| `http` | `none`, `basic`, `form`, `form_nonce`, `url_token`, `form_pbkdf2`, `form_sjcl` | stateless, cookie, CSRF, url_token | `table`, `table_transposed`, `html_fields`, `javascript`, `javascript_json`, `json` | `http` |
+| `http` | `none`, `basic`, `form`, `form_nonce`, `url_token`, `form_pbkdf2`, `form_sjcl` | stateless, cookie, CSRF, url_token | `table`, `table_transposed`, `html_fields`, `javascript`, `javascript_json`, `json`, `json_transposed` | `http` |
 | `hnap` | `hnap` | implicit (uid + HNAP_AUTH) | `hnap` | `hnap` |
 | `cbn` | `form_cbn` | cookie (rotating sessionToken + stable SID) | `xml` | `cbn` |
 

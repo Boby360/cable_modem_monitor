@@ -55,7 +55,7 @@ Each extraction format has its own specification:
 | [FORMAT_TABLE_SPEC.md](FORMAT_TABLE_SPEC.md) | `table`, `table_transposed` | HTML `<table>` elements, companion table merging |
 | [FORMAT_JAVASCRIPT_SPEC.md](FORMAT_JAVASCRIPT_SPEC.md) | `javascript`, `javascript_json` | Delimited strings and JSON arrays in JS |
 | [FORMAT_HNAP_SPEC.md](FORMAT_HNAP_SPEC.md) | `hnap` | Delimiter-separated values in HNAP JSON |
-| [FORMAT_JSON_SPEC.md](FORMAT_JSON_SPEC.md) | `json` | JSON API responses via field paths |
+| [FORMAT_JSON_SPEC.md](FORMAT_JSON_SPEC.md) | `json`, `json_transposed` | JSON API responses via field paths or indexed-pivot rows |
 | [FORMAT_XML_SPEC.md](FORMAT_XML_SPEC.md) | `xml` | XML element children via tag names |
 
 ### Related Specifications
@@ -92,7 +92,7 @@ respectively).
 | Transport | Valid Formats | Why |
 |-----------|--------------|-----|
 | `hnap` | `hnap` | Protocol-defined: SOAP JSON with delimiters |
-| `http` | `table`, `table_transposed`, `html_fields`, `javascript`, `javascript_json`, `json` | Format determines decode step; any format supports optional `encoding` property (e.g., `base64` — decoded before format-specific parsing). |
+| `http` | `table`, `table_transposed`, `html_fields`, `javascript`, `javascript_json`, `json`, `json_transposed` | Format determines decode step; any format supports optional `encoding` property (e.g., `base64` — decoded before format-specific parsing). |
 | `cbn` | `xml` | XML POST API: parameterized POST with XML responses |
 
 See [MODEM_YAML_SPEC.md](MODEM_YAML_SPEC.md#validation-rules) for the full transport constraint
@@ -113,6 +113,7 @@ table including auth strategies.
 | **JSON** | | | |
 | `hnap` | `HNAPParser` | Delimiter-separated values in HNAP JSON responses | any section |
 | `json` | `JSONParser` | JSON response structures via field paths | any section |
+| `json_transposed` | `JSONTransposedParser` | JSON responses with `name`+`indexN` rows (rows=metrics, cols=channels) | downstream/upstream |
 | **XML** | | | |
 | `xml` | `XMLParser` | XML element children via tag name navigation | any section |
 

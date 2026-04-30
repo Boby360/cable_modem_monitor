@@ -6,11 +6,14 @@ Per PARSING_SPEC.md System Info section.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from functools import reduce
+from operator import or_
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Tag, model_validator
 
 from .common import _check_field_type
+from .format_registry import DecodeKind, FormatModel
 
 
 class HTMLFieldMapping(BaseModel):
@@ -45,6 +48,10 @@ class HTMLFieldMapping(BaseModel):
 class HTMLFieldsSource(BaseModel):
     """html_fields source for system_info."""
 
+    format_tag: ClassVar[str] = "html_fields"
+    decode_kind: ClassVar[DecodeKind] = "html"
+    transports: ClassVar[frozenset[str]] = frozenset({"http"})
+
     model_config = ConfigDict(extra="forbid")
     format: Literal["html_fields"]
     resource: str
@@ -71,6 +78,10 @@ class HNAPFieldMapping(BaseModel):
 
 class HNAPSystemInfoSource(BaseModel):
     """HNAP source for system_info."""
+
+    format_tag: ClassVar[str] = "hnap"
+    decode_kind: ClassVar[DecodeKind] = "hnap"
+    transports: ClassVar[frozenset[str]] = frozenset({"hnap"})
 
     model_config = ConfigDict(extra="forbid")
     format: Literal["hnap"]
@@ -113,6 +124,10 @@ class JSSystemInfoFunction(BaseModel):
 class JSSystemInfoSource(BaseModel):
     """JavaScript-embedded source for system_info."""
 
+    format_tag: ClassVar[str] = "javascript"
+    decode_kind: ClassVar[DecodeKind] = "html"
+    transports: ClassVar[frozenset[str]] = frozenset({"http"})
+
     model_config = ConfigDict(extra="forbid")
     format: Literal["javascript"]
     resource: str
@@ -147,6 +162,10 @@ class JSONSystemInfoSource(BaseModel):
     object for field lookups — same concept as the channel parser's
     ``array_path``.
     """
+
+    format_tag: ClassVar[str] = "json"
+    decode_kind: ClassVar[DecodeKind] = "json"
+    transports: ClassVar[frozenset[str]] = frozenset({"http"})
 
     model_config = ConfigDict(extra="forbid")
     format: Literal["json"]
@@ -186,6 +205,10 @@ class JSVarsSystemInfoSource(BaseModel):
     ``javascript`` format (which parses ``tagValueList`` delimited
     strings), this handles standalone named variables.
     """
+
+    format_tag: ClassVar[str] = "javascript_vars"
+    decode_kind: ClassVar[DecodeKind] = "html"
+    transports: ClassVar[frozenset[str]] = frozenset({"http"})
 
     model_config = ConfigDict(extra="forbid")
     format: Literal["javascript_vars"]
@@ -240,6 +263,10 @@ class XMLChildAggregate(BaseModel):
 class XMLSystemInfoSource(BaseModel):
     """XML element source for system_info."""
 
+    format_tag: ClassVar[str] = "xml"
+    decode_kind: ClassVar[DecodeKind] = "xml"
+    transports: ClassVar[frozenset[str]] = frozenset({"cbn"})
+
     model_config = ConfigDict(extra="forbid")
     format: Literal["xml"]
     resource: str
@@ -255,15 +282,38 @@ def _get_source_format(data: Any) -> str:
     return str(getattr(data, "format", ""))
 
 
-SystemInfoSource = Annotated[
-    Annotated[HTMLFieldsSource, Tag("html_fields")]
-    | Annotated[HNAPSystemInfoSource, Tag("hnap")]
-    | Annotated[JSSystemInfoSource, Tag("javascript")]
-    | Annotated[JSVarsSystemInfoSource, Tag("javascript_vars")]
-    | Annotated[JSONSystemInfoSource, Tag("json")]
-    | Annotated[XMLSystemInfoSource, Tag("xml")],
-    Discriminator(_get_source_format),
+# Single source of truth for system_info source format metadata.
+# Adding a source = define the model with its ClassVars and append here.
+#
+# The static SystemInfoSource alias (visible to mypy/Pyright via the
+# TYPE_CHECKING block below) must enumerate the same models in the
+# same order. ``test_system_info_source_registry_alignment`` enforces
+# this — the static alias and the runtime list cannot drift.
+SYSTEM_INFO_SOURCE_MODELS: list[type[FormatModel]] = [
+    HTMLFieldsSource,
+    HNAPSystemInfoSource,
+    JSSystemInfoSource,
+    JSVarsSystemInfoSource,
+    JSONSystemInfoSource,
+    XMLSystemInfoSource,
 ]
+
+
+if TYPE_CHECKING:
+    SystemInfoSource = Annotated[
+        Annotated[HTMLFieldsSource, Tag("html_fields")]
+        | Annotated[HNAPSystemInfoSource, Tag("hnap")]
+        | Annotated[JSSystemInfoSource, Tag("javascript")]
+        | Annotated[JSVarsSystemInfoSource, Tag("javascript_vars")]
+        | Annotated[JSONSystemInfoSource, Tag("json")]
+        | Annotated[XMLSystemInfoSource, Tag("xml")],
+        Discriminator(_get_source_format),
+    ]
+else:
+    SystemInfoSource = Annotated[
+        reduce(or_, (Annotated[m, Tag(m.format_tag)] for m in SYSTEM_INFO_SOURCE_MODELS)),
+        Discriminator(_get_source_format),
+    ]
 
 
 class SystemInfoSection(BaseModel):

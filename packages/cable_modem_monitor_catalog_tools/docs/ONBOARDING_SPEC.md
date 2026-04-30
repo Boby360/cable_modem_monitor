@@ -448,7 +448,7 @@ Format is constrained by transport:
 | Transport | Format detection |
 |-----------|-----------------|
 | `hnap` | Always `hnap`. See HNAP format detection below. |
-| `http` | Inspect data page responses — see below. JSON responses use `json` format; HTML responses use `table`, `table_transposed`, `javascript`, `javascript_json`, or `html_fields`. |
+| `http` | Inspect data page responses — see below. JSON responses use `json` (or `json_transposed` for `name`+`indexN` pivot shapes); HTML responses use `table`, `table_transposed`, `javascript`, `javascript_json`, or `html_fields`. |
 
 #### HNAP format detection
 
@@ -1594,7 +1594,7 @@ Reproduced from [MODEM_YAML_SPEC.md](MODEM_YAML_SPEC.md#validation-rules) for qu
 
 | Transport | Valid auth strategies | Valid formats | Valid action types |
 |-----------|---------------------|---------------|-------------------|
-| `http` | `none`, `basic`, `form`, `form_nonce`, `url_token`, `form_pbkdf2`, `form_sjcl` | `table`, `table_transposed`, `html_fields`, `javascript`, `javascript_json`, `json`, `xml` | `http` |
+| `http` | `none`, `basic`, `form`, `form_nonce`, `url_token`, `form_pbkdf2`, `form_sjcl` | `table`, `table_transposed`, `html_fields`, `javascript`, `javascript_json`, `json`, `json_transposed`, `xml` | `http` |
 | `hnap` | `hnap` | `hnap` | `hnap` |
 
 ---

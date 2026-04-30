@@ -6,11 +6,12 @@ Per PARSING_SPEC.md JSEmbeddedParser section.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .common import ChannelMapping, FilterValue
+from .format_registry import DecodeKind
 
 
 class JSFunction(BaseModel):
@@ -27,6 +28,10 @@ class JSFunction(BaseModel):
 
 class JSEmbeddedSection(BaseModel):
     """JSEmbeddedParser section config."""
+
+    format_tag: ClassVar[str] = "javascript"
+    decode_kind: ClassVar[DecodeKind] = "html"
+    transports: ClassVar[frozenset[str]] = frozenset({"http"})
 
     model_config = ConfigDict(extra="forbid")
     format: Literal["javascript"]

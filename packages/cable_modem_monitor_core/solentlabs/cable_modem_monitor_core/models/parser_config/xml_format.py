@@ -8,11 +8,12 @@ Per PARSING_SPEC.md XMLParser section.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .common import ChannelTypeConfig, FilterValue, _check_field_type
+from .format_registry import DecodeKind
 
 
 class XMLColumnMapping(BaseModel):
@@ -80,6 +81,10 @@ class XMLSection(BaseModel):
 
     See PARSING_SPEC.md § XML Tables.
     """
+
+    format_tag: ClassVar[str] = "xml"
+    decode_kind: ClassVar[DecodeKind] = "xml"
+    transports: ClassVar[frozenset[str]] = frozenset({"cbn"})
 
     model_config = ConfigDict(extra="forbid")
     format: Literal["xml"]

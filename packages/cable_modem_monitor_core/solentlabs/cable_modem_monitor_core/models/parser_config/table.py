@@ -6,11 +6,12 @@ Per PARSING_SPEC.md HTMLTableParser section.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .common import ChannelTypeConfig, ColumnMapping, FilterValue, TableSelector
+from .format_registry import DecodeKind
 
 
 class TableDefinition(BaseModel):
@@ -27,6 +28,10 @@ class TableDefinition(BaseModel):
 
 class HTMLTableSection(BaseModel):
     """HTMLTableParser section config."""
+
+    format_tag: ClassVar[str] = "table"
+    decode_kind: ClassVar[DecodeKind] = "html"
+    transports: ClassVar[frozenset[str]] = frozenset({"http"})
 
     model_config = ConfigDict(extra="forbid")
     format: Literal["table"]
