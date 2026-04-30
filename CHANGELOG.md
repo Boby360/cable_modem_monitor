@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every working browser request in the user-supplied HAR carried it,
   but the catalog entry didn't replay it. Adds `Referer: "{base_url}/"`
   to the modem.yaml. Issue #86.
+- **Setup crashed with `KeyError: 'lock_status'` on 9 catalog
+  modems.** `mapping_manager` re-implemented an unlocked-channel
+  nulling rule that Core's coordinator already performs on every
+  poll, with stricter key-presence semantics, and crashed on the
+  very key it had just confirmed absent. Affected `arris/cm820b`,
+  `arris/tm1602a`, and 7 others. Removed the redundant pass; HA
+  trusts Core's contract. Closes the seam with a
+  catalog-wide `mapping_manager` regression test. Issue #89.
 
 ### Added
 
@@ -32,6 +40,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   N-round-trip "ship a theory, user retries, fail, repeat" loop
   that #86 spent four alphas on. See ARCHITECTURE_DECISIONS.md
   "Resource-load failure detail via request-shape log."
+- `HealthInfo.tcp_latency_ms` field exposed in core orchestration,
+  HA diagnostics, and the new `TCP Latency` sensor.
+- **Options-flow cool-off window.** `HealthMonitor` now exposes
+  `collection_active` and `last_collection_success_at`; the
+  options-flow validation waits for a quiet window (no active
+  collection, ≥5s since last success) before re-authing. Prevents
+  session-contention failures on session-limited modems
+  (MB7621 confirmed) when a re-auth would otherwise overlap with
+  an in-flight poll.
+- **`urllib3` log filter for `MissingHeaderBodySeparatorDefect`.**
+  Some firmwares (SB6141 confirmed) emit `Cache-Control` with a
+  non-RFC space before the colon, producing noisy
+  `MissingHeaderBodySeparatorDefect` tracebacks on every poll. New
+  `solentlabs.cable_modem_monitor_core.log_filters` module installs
+  a `logging.Filter` at core import time that drops them. Module
+  documents the pattern for future filter additions.
 
 ### Changed
 
@@ -56,11 +80,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DEFAULT_HEALTH_CHECK_INTERVAL_GET_ONLY = 60` was removed — all
   three probes (ICMP, TCP, HEAD) are lightweight, so the per-
   capability cadence differentiation is no longer needed.
-
-### Added
-
-- `HealthInfo.tcp_latency_ms` field exposed in core orchestration,
-  HA diagnostics, and the new `TCP Latency` sensor.
+- **Config-entry uniqueness keyed on entity prefix, not hostname.**
+  A user can now add a different modem at the same default IP
+  (e.g. swapping an MB7621 for an SB6141 for testing) as long as a
+  different entity prefix is chosen. Same prefix at any host still
+  blocks setup — entity ID collision is the actual concern.
+- **Protocol detection rewritten to TCP probe + TLS handshake.**
+  `detect_protocol` now TCP-probes :80 and :443 and runs a TLS
+  handshake on :443 with a `SECLEVEL=0` broad-cipher context,
+  preferring HTTPS whenever the handshake completes. `legacy_ssl`
+  is observed from the negotiated TLS version (TLSv1.1 or older
+  → True) instead of inferred from a failed-and-retried-with-
+  weaker-ciphers attempt. Authentication runs exactly once per
+  UC-86: the previous three-attempt fallback chain
+  (HTTP → HTTPS → HTTPS+legacy) is removed. On single-session
+  firmware the chain previously collided with its own first
+  attempt and produced misleading `MSG_LOGIN_150`-style errors;
+  the new flow surfaces the first error directly. Related to #120
+  (awaiting user confirmation on the originating hardware).
 
 ## [3.14.0-beta.1] - 2026-04-28
 
