@@ -17,6 +17,8 @@ from custom_components.cable_modem_monitor.core.log_buffer import (
     MAX_LOG_ENTRIES,
     BufferingHandler,
     LogBuffer,
+    get_log_buffer,
+    get_log_entries,
     sanitize_log_message,
     setup_log_buffer,
     strip_logger_prefix,
@@ -309,3 +311,98 @@ class TestSetupLogBuffer:
 
         assert buffer_first is buffer_recovered
         assert len(buffer_recovered.get_entries()) == 1
+
+
+# ============================================================================
+# LogBuffer.clear and BufferingHandler.emit error path
+# ============================================================================
+
+
+def test_log_buffer_clear_removes_all_entries() -> None:
+    """clear() empties the entries deque."""
+    buf = LogBuffer()
+    buf.add("INFO", "test", "first")
+    buf.add("INFO", "test", "second")
+    assert len(buf.get_entries()) == 2
+
+    buf.clear()
+    assert buf.get_entries() == []
+
+
+def test_buffering_handler_swallows_format_errors() -> None:
+    """A formatter that raises is caught by handleError, not propagated."""
+    import logging
+
+    buf = LogBuffer()
+    handler = BufferingHandler(buf)
+
+    class _Boom(logging.Formatter):
+        def format(self, record: logging.LogRecord) -> str:
+            raise RuntimeError("synthetic format failure")
+
+    handler.setFormatter(_Boom())
+
+    record = logging.LogRecord(
+        name="custom_components.cable_modem_monitor",
+        level=logging.INFO,
+        pathname="test",
+        lineno=0,
+        msg="msg",
+        args=None,
+        exc_info=None,
+    )
+
+    # Must not raise.
+    handler.emit(record)
+
+    # Buffer untouched because format raised before add() ran.
+    assert buf.get_entries() == []
+
+
+# ============================================================================
+# get_log_buffer / get_log_entries — accessor edge cases
+# ============================================================================
+
+
+def test_get_log_buffer_returns_none_when_domain_missing() -> None:
+    """No DOMAIN key in hass.data → None."""
+    hass = MagicMock()
+    hass.data = {}
+    assert get_log_buffer(hass) is None
+
+
+def test_get_log_buffer_returns_none_when_buffer_missing_or_wrong_type() -> None:
+    """DOMAIN exists but log_buffer is missing or non-LogBuffer → None."""
+    hass = MagicMock()
+    hass.data = {"cable_modem_monitor": {}}
+    assert get_log_buffer(hass) is None
+
+    hass.data = {"cable_modem_monitor": {"log_buffer": "not a buffer"}}
+    assert get_log_buffer(hass) is None
+
+
+def test_get_log_buffer_returns_buffer_when_present() -> None:
+    """Happy path — registered LogBuffer is returned."""
+    buf = LogBuffer()
+    hass = MagicMock()
+    hass.data = {"cable_modem_monitor": {"log_buffer": buf}}
+    assert get_log_buffer(hass) is buf
+
+
+def test_get_log_entries_empty_when_buffer_missing() -> None:
+    """get_log_entries returns [] when no buffer is registered."""
+    hass = MagicMock()
+    hass.data = {}
+    assert get_log_entries(hass) == []
+
+
+def test_get_log_entries_returns_buffer_entries() -> None:
+    """get_log_entries forwards the buffer's entries."""
+    buf = LogBuffer()
+    buf.add("INFO", "test", "first")
+    hass = MagicMock()
+    hass.data = {"cable_modem_monitor": {"log_buffer": buf}}
+
+    entries = get_log_entries(hass)
+    assert len(entries) == 1
+    assert entries[0]["message"] == "first"
