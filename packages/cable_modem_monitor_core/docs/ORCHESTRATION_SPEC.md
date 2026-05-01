@@ -1161,15 +1161,33 @@ identify root cause without reading code. The auth failure streak
 count appears in every auth-related log so the progression is visible
 in a linear log scan.
 
-**Two steady-state INFO lines per poll cycle (the "pulse"):**
+**Steady-state success-path logs are DEBUG.** All success-path
+orchestration logs — auth, resource loading, session state, parse
+completion — fire at INFO on the first poll and drop to DEBUG after.
+The first poll lands first-install diagnostics in the default log
+view without requiring DEBUG; subsequent polls go quiet to avoid
+flooding multi-modem logs.
 
-1. `"Poll [MODEL] — auth: FormAuth, url: http://..., credentials: yes, session: cached"` (first poll only; DEBUG after)
-2. `"Parse complete [MODEL]: 24 DS, 4 US channels"` (every poll — the heartbeat)
+**Operator-relevant transitions stay at INFO** regardless of poll
+count: status transitions, adaptive-reuse state changes, counter
+resets, recovery events, modem reboots. These are not steady-state
+heartbeat logs — they reflect changes the user benefits from seeing.
 
-The parse line is the integration's pulse. In a multi-modem setup,
-each modem produces one INFO line per 10-minute poll. All other
-orchestration logging (auth, resource loading, session state) drops
-to DEBUG after the first successful poll to avoid flooding logs.
+**Liveness confirmation without DEBUG:** users have two paths to
+verify the integration is polling without enabling DEBUG logging:
+
+1. **Integration UI** — Settings → Devices & Services → Cable Modem
+   Monitor → Download Diagnostics. The JSON dump includes
+   `last_poll_at`, streak counters, reuse state, and channel counts.
+2. **Settings change** — temporarily enable DEBUG logging via
+   Settings → System → Logs to surface per-poll detail.
+
+**First-poll trigger** — the "first poll INFO" mode fires on:
+fresh install, reconfigure (entry reload), HA server start/restart
+(orchestrator instance recreation), and `reset_auth()` (user-triggered
+reauth). Modem reboot is not in this list — it gets its own one-line
+INFO event ("Counter reset detected …") and does not trigger verbose
+first-poll output.
 
 **Auth lifecycle:**
 
@@ -1184,9 +1202,9 @@ to DEBUG after the first successful poll to avoid flooding logs.
 
 **Collection outcomes:**
 
-- INFO: `"Parse complete [MODEL]: 24 DS, 4 US channels"` (every poll)
+- INFO (first poll) / DEBUG (after): `"Parse complete [MODEL]: 24 DS, 4 US channels"`
 - WARNING: `"Poll failed [MODEL] — signal: connectivity, error: ..."`
-- INFO: `"Counter reset detected [MODEL] — corrected: 1000→0, uncorrected: 50→0"`
+- INFO: `"Counter reset detected [MODEL] — corrected: 1000→0, uncorrected: 50→0"` (modem reboot — operator-relevant transition, never demoted)
 
 **State transitions:**
 

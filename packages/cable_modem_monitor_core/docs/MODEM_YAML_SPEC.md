@@ -785,6 +785,13 @@ to poll, login fails with `AuthResult.FAILURE` and status reports
 `auth_failed`. Recovery happens naturally when the other session ends
 (explicit logout or modem-side timeout).
 
+> **Scope of `max_concurrent`** — this field controls *session
+> lifecycle* (whether the integration must logout after each poll),
+> not *session reuse strategy* (whether the integration tries to
+> reuse a cached session across polls). Reuse strategy is
+> runtime-detected by core (see RUNTIME_POLLING_SPEC.md "Adaptive
+> reuse disable") and is intentionally not configurable per modem.
+
 See RUNTIME_POLLING_SPEC.md for the full session lifecycle.
 
 Evidence: modems that reject concurrent sessions — a second login

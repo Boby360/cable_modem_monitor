@@ -319,6 +319,17 @@ starts each poll with a fresh login. An intervening normal successful
 poll resets the recovery streak. This state is runtime-only —
 `reset_auth()` or process restart re-enables reuse.
 
+Session reuse strategy is intentionally not exposed as a per-modem
+yaml field. Per CLAUDE.md's "no per-modem recovery tuning" principle,
+all reuse-strategy adaptation lives in core via the runtime streak
+counter — generic across modems, self-tuning, and restart-resetting.
+The streak is signal-agnostic: it counts any same-poll `LOAD_AUTH`
+recovery, including reboot-induced stale sessions. False positives
+are benign — forced fresh login is harmless. Note that this is
+orthogonal to `session.max_concurrent`, which controls *session
+lifecycle* (logout-after-poll for single-session modems), not *reuse
+strategy*.
+
 **Login backoff** — after a `LoginLockoutError` (firmware anti-brute-force
 triggered), the orchestrator suppresses login for 3 polls. This gives the
 modem time to clear its lockout state. The counter decrements each poll
