@@ -246,8 +246,184 @@ Once tests are green and the diff looks right:
    you ran one), channel counts from Step 8, and any unresolved
    warnings from `analyze_har`.
 
-A maintainer reviews and merges. The originating issue is closed by
-whoever filed it once the parser is confirmed on real hardware.
+A maintainer reviews and merges. The modem lands in the catalog with
+`status: awaiting_verification`. The Confirmation Phase below closes
+the loop once a contributor reports the parser working on real
+hardware.
+
+## Confirmation Phase
+
+After the catalog entry ships in a release, the contributor who filed
+the original request (or any user with matching hardware) eventually
+reports back from a real install. When their diagnostics show the
+parser working, the maintainer captures that evidence as a
+`*.verified.json` fixture and flips the `modem.yaml` status to
+`confirmed`. This phase is maintainer-side; the contributor's only
+job is to share their HA diagnostics download.
+
+### Step 12: Receive Hardware Confirmation
+
+Trigger: the originating issue gets a comment with a config-entry
+diagnostics JSON attached and a positive report (channels populated,
+no errors, "it works").
+
+Open the diagnostics JSON and sanity-check:
+
+- `data.modem_data.error` is empty
+- `data.data_coordinator.last_update_success` is `true`
+- `data.downstream_channels` and `data.upstream_channels` have the
+  expected counts and locked entries with full fields (frequency,
+  power, snr, corrected/uncorrected where applicable)
+- `data.system_info` populated (docsis_status, system_uptime,
+  hardware_version, software_version, total_corrected,
+  total_uncorrected)
+- `data.config_entry.variant` matches the variant the contributor
+  used (relevant for multi-variant modems — see Gotchas)
+
+If anything is missing or wrong, treat it as another iteration: ask
+clarifying questions, ship a patch alpha, and wait for fresh
+diagnostics. Do NOT confirm partial wins.
+
+### Step 13: Build verified.json
+
+The verified.json is a faithful copy of the diagnostics `data`
+section, with integration-side noise stripped and provenance metadata
+prepended. It is **not** a curated subset — keep all modem-side data
+verbatim so future schema work can diff against real hardware output.
+
+Strip these top-level keys from `data`:
+
+- `home_assistant`
+- `custom_components`
+- `integration_manifest`
+- `setup_times`
+- `_solentlabs`
+- `_review_before_sharing`
+- `recent_logs`
+
+Prepend at the top of the resulting object:
+
+```json
+{
+  "verified_at": "YYYY-MM-DD",
+  "version": "<release tag, e.g. 3.14.0-beta.1>",
+  ...
+}
+```
+
+Render channel arrays compact — one channel object per line:
+
+```json
+"downstream_channels": [
+  {"lock_status": "locked", "channel_type": "qam", "channel_id": 17, ...},
+  {"lock_status": "locked", "channel_type": "qam", "channel_id": 18, ...},
+  ...
+]
+```
+
+This is the convention used by the majority of existing verified.json
+files. Keep dict bodies indented normally; only the channel-array
+elements are compact.
+
+Save to: `packages/cable_modem_monitor_catalog/.../<manufacturer>/<model>/test_data/<variant>.verified.json`.
+
+For single-variant modems, the file is `modem.verified.json`. For
+multi-variant modems, name it after the variant the contributor used
+(e.g. `modem-basic.verified.json`).
+
+### Step 14: Flip Status
+
+Edit `modem.yaml` (or the variant-specific YAML):
+
+```yaml
+status: awaiting_verification  →  status: confirmed
+```
+
+For multi-variant modems, **only flip the variant the contributor
+verified.** A confirmation on one variant does not transfer to the
+others — each variant exercises a different transport/auth path and
+must be verified independently.
+
+### Step 15: Commit and Reply
+
+Stage the two files and commit with this message shape:
+
+```text
+feat(catalog): mark <Make> <Model> [(<variant>)] as confirmed
+
+Verified by @<github-handle> on <release-tag> hardware (HW <ver>,
+SW <ver>, <uptime or other distinguishing detail>, <DS> DS + <US> US
+locked, all signals nominal).
+
+Refreshes <variant>.verified.json from their diagnostics; flips
+<modem.yaml | modem-<variant>.yaml> status awaiting_verification ->
+confirmed. <Note any sibling variants that remain awaiting_verification
+and what would be needed to confirm them.>
+
+Related to #<issue>
+```
+
+Reply on the originating issue with a short, personal close: thank
+the contributor, point them at the `Cable Modem Monitor: Generate
+Dashboard` action under **Developer Tools > Actions**, and invite a
+fresh issue if anything looks off later. Then close the issue.
+
+## Confirmation Gotchas
+
+These came out of real confirmations and are easy to miss on a first
+pass.
+
+### Channel-array format
+
+Compact (one channel per line) is the convention. If you generate a
+verified.json with `json.dumps(..., indent=2)` you'll get the
+expanded form by default — reformat the channel arrays before
+committing. The compact form keeps the diff readable when fixture
+data churns and matches every other file in the catalog.
+
+### verified.json is a point-in-time snapshot
+
+Each `verified.json` reflects what the integration emitted at the
+moment of confirmation, against the integration version cited in the
+file's `version` field. The integration's diagnostics shape evolves
+over time (fields get added, renamed, restructured) — that's normal,
+and historical fixtures don't need to track those changes.
+
+**Match the current diagnostics shape on the file you're writing
+now.** Don't normalize older files retroactively. If a future
+diagnostics change makes a historical fixture genuinely obsolete,
+re-confirmation is the answer, not in-place editing.
+
+### Catalog directory vs self-reported model
+
+A modem's catalog directory name doesn't always match the model
+string the firmware reports in diagnostics. For example, the modem
+may self-report as `S33` while the catalog directory is `s33v2` to
+distinguish hardware revisions. The `verify_diagnostics` CLI accepts
+`--manufacturer` / `--model` overrides to bridge this gap.
+
+### Multi-variant modems
+
+A modem with `modem.yaml` plus one or more `modem-<variant>.yaml`
+files (e.g. `modem-basic.yaml` for a Basic Auth variant of the same
+hardware) has independent test_data and independent status per
+variant. Each variant is its own confirmation surface:
+
+- One contributor's confirmation only validates the variant their
+  config_entry shows in `data.config_entry.variant`
+- Sibling variants stay `awaiting_verification` until a different
+  contributor (or the same contributor in different conditions)
+  exercises that path
+- The commit message must name which variant was confirmed and call
+  out which siblings remain unverified
+
+### Diagnostics partial wins
+
+A diagnostics JSON can show "most things working" — channels
+populated, latency healthy — while one or two `system_info` fields
+are still null. That's not a confirmation; that's an alpha cycle.
+Confirm only when the full system_info block is populated and there
+are no errors in `modem_data`.
 
 ## Key Rules
 
