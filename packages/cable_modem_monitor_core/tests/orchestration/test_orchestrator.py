@@ -223,7 +223,7 @@ class TestFirstPoll:
         assert m.session_is_valid is True
         assert m.poll_duration is not None
         assert m.poll_duration >= 0
-        assert m.last_poll_timestamp is not None
+        assert m.last_poll_at is not None
 
 
 class TestSessionReuse:
@@ -1329,7 +1329,7 @@ class TestDiagnostics:
         assert m.circuit_breaker_open is False
         assert m.connectivity_streak == 0
         assert m.connectivity_backoff_remaining == 0
-        assert m.last_poll_timestamp is None
+        assert m.last_poll_at is None
 
     def test_diagnostics_after_successful_poll(self) -> None:
         """Diagnostics reflect latest poll."""
@@ -1342,7 +1342,7 @@ class TestDiagnostics:
         assert m.auth_failure_streak == 0
         assert m.circuit_breaker_open is False
         assert m.session_is_valid is True
-        assert m.last_poll_timestamp is not None
+        assert m.last_poll_at is not None
 
     def test_diagnostics_after_failure(self) -> None:
         """Diagnostics track auth failure streak."""

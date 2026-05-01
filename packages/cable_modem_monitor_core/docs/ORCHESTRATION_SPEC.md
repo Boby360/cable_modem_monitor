@@ -794,8 +794,8 @@ class OrchestratorDiagnostics:
             successful collection. Empty list if never polled or
             collection failed before resource loading. Consumers
             compute aggregates (min/max/avg) from this raw data.
-        last_poll_timestamp: Monotonic time of last get_modem_data()
-            call. None if never polled.
+        last_poll_at: ISO 8601 wall-clock timestamp (UTC) of the last
+            ``get_modem_data()`` call. None if never polled.
 
     Note: auth-failure wire detail is not stored on this dataclass.
     The collector emits a single sanitized ``WARNING`` log when
@@ -813,7 +813,7 @@ class OrchestratorDiagnostics:
     stale_session_recovery_streak: int = 0
     session_reuse_disabled: bool = False
     resource_fetches: list[ResourceFetch] = field(default_factory=list)
-    last_poll_timestamp: float | None = None
+    last_poll_at: str | None = None
 
 
 class ConnectionStatus(Enum):

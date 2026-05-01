@@ -38,7 +38,7 @@
       "connectivity_streak": 0,
       "connectivity_backoff_remaining": 0,
       "resource_fetches": [],
-      "last_poll_timestamp": 1000.0
+      "last_poll_at": "2026-05-01T12:00:00+00:00"
     },
     "data_coordinator": {
       "last_update_success": true,

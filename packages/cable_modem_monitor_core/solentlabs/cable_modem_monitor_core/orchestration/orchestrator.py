@@ -98,7 +98,7 @@ class Orchestrator:
 
         # Diagnostics state
         self._last_poll_duration: float | None = None
-        self._last_poll_timestamp: float | None = None
+        self._last_poll_at: str | None = None
 
         # Monotonic timestamp of the last CONNECTIVITY failure. Used
         # by the "health recovery clears connectivity backoff"
@@ -126,12 +126,12 @@ class Orchestrator:
             status fields.
         """
         start = time.monotonic()
+        self._last_poll_at = datetime.now(UTC).isoformat()
 
         try:
             snapshot = self._execute_poll()
         finally:
             self._last_poll_duration = time.monotonic() - start
-            self._last_poll_timestamp = start
 
         return snapshot
 
@@ -198,7 +198,7 @@ class Orchestrator:
             stale_session_recovery_streak=self._policy.stale_session_recovery_streak,
             session_reuse_disabled=self._policy.session_reuse_disabled,
             resource_fetches=self._collector.last_resource_fetches,
-            last_poll_timestamp=self._last_poll_timestamp,
+            last_poll_at=self._last_poll_at,
         )
 
     @property

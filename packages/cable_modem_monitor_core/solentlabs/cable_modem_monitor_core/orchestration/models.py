@@ -197,8 +197,8 @@ class OrchestratorDiagnostics:
             runtime after repeated consecutive stale-session recoveries.
         resource_fetches: Per-resource timing and size from the last
             successful collection.
-        last_poll_timestamp: Monotonic time of last get_modem_data()
-            call. None if never polled.
+        last_poll_at: ISO 8601 wall-clock timestamp (UTC) of the last
+            ``get_modem_data()`` call. None if never polled.
     """
 
     poll_duration: float | None
@@ -211,7 +211,7 @@ class OrchestratorDiagnostics:
     stale_session_recovery_streak: int = 0
     session_reuse_disabled: bool = False
     resource_fetches: list[ResourceFetch] = field(default_factory=list)
-    last_poll_timestamp: float | None = None
+    last_poll_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict for diagnostics output."""
@@ -226,7 +226,7 @@ class OrchestratorDiagnostics:
             "stale_session_recovery_streak": self.stale_session_recovery_streak,
             "session_reuse_disabled": self.session_reuse_disabled,
             "resource_fetches": [f.to_dict() for f in self.resource_fetches],
-            "last_poll_timestamp": self.last_poll_timestamp,
+            "last_poll_at": self.last_poll_at,
         }
 
 

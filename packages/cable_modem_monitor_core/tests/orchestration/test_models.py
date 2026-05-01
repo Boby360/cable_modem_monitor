@@ -181,7 +181,7 @@ class TestOrchestratorDiagnostics:
             session_is_valid=False,
         )
         assert metrics.resource_fetches == []
-        assert metrics.last_poll_timestamp is None
+        assert metrics.last_poll_at is None
         assert metrics.auth_strategy == ""
 
     def test_after_successful_poll(self) -> None:
@@ -196,7 +196,7 @@ class TestOrchestratorDiagnostics:
             circuit_breaker_open=False,
             session_is_valid=True,
             resource_fetches=fetches,
-            last_poll_timestamp=1234567.89,
+            last_poll_at="2026-05-01T12:00:00+00:00",
         )
         assert len(metrics.resource_fetches) == 2
         assert metrics.poll_duration == 2.5
@@ -221,7 +221,7 @@ class TestOrchestratorDiagnostics:
             "stale_session_recovery_streak": 0,
             "session_reuse_disabled": False,
             "resource_fetches": [],
-            "last_poll_timestamp": None,
+            "last_poll_at": None,
         }
 
     def test_to_dict_with_fetches(self) -> None:
@@ -239,7 +239,7 @@ class TestOrchestratorDiagnostics:
             connectivity_streak=3,
             connectivity_backoff_remaining=2,
             resource_fetches=fetches,
-            last_poll_timestamp=1234567.89,
+            last_poll_at="2026-05-01T12:00:00+00:00",
         )
         result = metrics.to_dict()
         assert result["poll_duration"] == 2.5
@@ -247,7 +247,7 @@ class TestOrchestratorDiagnostics:
         assert result["auth_strategy"] == "form"
         assert result["connectivity_streak"] == 3
         assert result["connectivity_backoff_remaining"] == 2
-        assert result["last_poll_timestamp"] == 1234567.89
+        assert result["last_poll_at"] == "2026-05-01T12:00:00+00:00"
         assert len(result["resource_fetches"]) == 2
         assert result["resource_fetches"][0] == {
             "path": "/status.html",
