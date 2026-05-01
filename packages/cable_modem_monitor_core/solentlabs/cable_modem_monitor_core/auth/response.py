@@ -76,6 +76,7 @@ def parse_json_dict(
         return AuthResult(
             success=False,
             error=(f"{label} is not valid JSON " f"(status {response.status_code}): " f"{safe_preview(response.text)}"),
+            response=response,
         )
 
     # Some firmwares double-encode: the HTTP body is a JSON string
@@ -93,6 +94,7 @@ def parse_json_dict(
                 f"(status {response.status_code}): "
                 f"{safe_preview(data)}"
             ),
+            response=response,
         )
 
     return data

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import urllib.parse
+from unittest.mock import patch
 
 import pytest
 import requests
@@ -58,6 +59,7 @@ class TestFormNonceAuthManager:
             result = manager.authenticate(session, server.base_url, "admin", "password")
             assert result.success is False
             assert "Invalid credentials" in result.error
+            assert result.response is not None
 
     def test_nonce_length_configurable(self, session: requests.Session) -> None:
         """Nonce length is respected."""
@@ -92,6 +94,30 @@ class TestFormNonceAuthManager:
             result = manager.authenticate(session, server.base_url, "admin", "pass")
             assert result.success is True
             assert result.response_url == ""
+
+    def test_login_post_request_exception(self, session: requests.Session) -> None:
+        """Non-connectivity RequestException on login POST returns AuthResult."""
+        config = FormNonceAuth(strategy="form_nonce", action="/login", nonce_field="nonce")
+        manager = FormNonceAuthManager(config)
+        manager.configure_session(session, {})
+
+        with patch.object(session, "post", side_effect=requests.RequestException("redirects")):
+            result = manager.authenticate(session, "http://192.168.100.1", "admin", "password")
+
+        assert result.success is False
+        assert "Nonce login POST failed" in result.error
+
+    def test_login_post_connection_error_propagates(self, session: requests.Session) -> None:
+        """ConnectionError on login POST propagates for collector to classify."""
+        config = FormNonceAuth(strategy="form_nonce", action="/login", nonce_field="nonce")
+        manager = FormNonceAuthManager(config)
+        manager.configure_session(session, {})
+
+        with (
+            patch.object(session, "post", side_effect=requests.ConnectionError("refused")),
+            pytest.raises(requests.ConnectionError),
+        ):
+            manager.authenticate(session, "http://127.0.0.1:1", "admin", "password")
 
 
 class TestPackB64Credentials:

@@ -155,6 +155,7 @@ class UrlTokenAuthManager(BaseAuthManager):
             return AuthResult(
                 success=False,
                 error=f"URL token login returned HTTP {response.status_code}",
+                response=response,
             )
 
         return response

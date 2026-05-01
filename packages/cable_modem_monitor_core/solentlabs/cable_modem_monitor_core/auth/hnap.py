@@ -176,6 +176,7 @@ class HnapAuthManager(BaseAuthManager):
                     f"(Challenge={challenge!r}, PublicKey={public_key!r}, "
                     f"Cookie={cookie!r})"
                 ),
+                response=response,
             )
 
         # Store challenge data for phase 2
@@ -266,18 +267,21 @@ class HnapAuthManager(BaseAuthManager):
             return AuthResult(
                 success=False,
                 error=(f"HNAP firmware anti-brute-force triggered: LoginResult={login_result}"),
+                response=response,
             )
 
         if login_result == "FAILED":
             return AuthResult(
                 success=False,
                 error="HNAP login failed: incorrect username or password",
+                response=response,
             )
 
         if login_result not in ("OK", "OK_CHANGED"):
             return AuthResult(
                 success=False,
                 error=f"HNAP login unexpected result: {login_result!r}",
+                response=response,
             )
 
         return AuthResult(

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
+import pytest
 import requests
 from solentlabs.cable_modem_monitor_core.auth.url_token import UrlTokenAuthManager
 from solentlabs.cable_modem_monitor_core.models.modem_config.auth import UrlTokenAuth
@@ -142,3 +145,42 @@ class TestUrlTokenAuthManager:
             assert result.success is True
             # Cookies are on the session — runner reads them via cookie_name
             assert len(session.cookies) > 0
+
+    def test_login_non_200(self, session: requests.Session) -> None:
+        """Reports error when login GET returns non-200, attaches response."""
+        config = UrlTokenAuth(strategy="url_token", login_page="/login.html")
+        manager = UrlTokenAuthManager(config)
+        manager.configure_session(session, {})
+
+        resp = MagicMock()
+        resp.status_code = 500
+        with patch.object(session, "get", return_value=resp):
+            result = manager.authenticate(session, "http://192.168.100.1", "admin", "password")
+
+        assert result.success is False
+        assert "500" in result.error
+        assert result.response is resp
+
+    def test_login_request_exception(self, session: requests.Session) -> None:
+        """Non-connectivity RequestException returns AuthResult; ConnectionError propagates."""
+        config = UrlTokenAuth(strategy="url_token", login_page="/login.html")
+        manager = UrlTokenAuthManager(config)
+        manager.configure_session(session, {})
+
+        with patch.object(session, "get", side_effect=requests.RequestException("redirects")):
+            result = manager.authenticate(session, "http://192.168.100.1", "admin", "password")
+
+        assert result.success is False
+        assert "URL token login failed" in result.error
+
+    def test_login_connection_error_propagates(self, session: requests.Session) -> None:
+        """ConnectionError on login GET propagates for collector to classify."""
+        config = UrlTokenAuth(strategy="url_token", login_page="/login.html")
+        manager = UrlTokenAuthManager(config)
+        manager.configure_session(session, {})
+
+        with (
+            patch.object(session, "get", side_effect=requests.ConnectionError("refused")),
+            pytest.raises(requests.ConnectionError),
+        ):
+            manager.authenticate(session, "http://127.0.0.1:1", "admin", "password")

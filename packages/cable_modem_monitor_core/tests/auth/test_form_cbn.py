@@ -194,22 +194,24 @@ def _setup_login_post_redirect(session: requests.Session) -> None:
 
 # fmt: off
 FAILURE_CASES = [
-    # (description, setup_fn, expected_error_substring)
-    ("login_page_http_error",   _setup_login_page_error, "Login page returned HTTP 500"),
-    ("missing_session_cookie",  _setup_missing_cookie,   "did not set 'sessionToken' cookie"),
-    # Network-error cases include the requests exception class name so
-    # log analysis can tell a refusal from a timeout at a glance.
-    ("login_post_failed",       _setup_post_failure,     "Login POST failed: ConnectionError"),
-    ("login_body_rejected",     _setup_login_rejected,   "Login failed: idloginincorrect"),
-    ("no_sid_in_response",      _setup_no_sid,           "SID not found in response"),
-    ("login_page_network_error", _setup_network_error,   "Failed to fetch login page: ConnectionError"),
-    ("login_post_302_redirect",  _setup_login_post_redirect, "Login POST returned HTTP 302"),
+    # (description, setup_fn, expected_error_substring, expects_response)
+    # expects_response: True when a Response was in scope at failure
+    # (collector's _log_auth_failure_detail can dump request/response
+    # detail). False for connection/network errors that fired before
+    # any response object existed.
+    ("login_page_http_error",   _setup_login_page_error,    "Login page returned HTTP 500",                 True),
+    ("missing_session_cookie",  _setup_missing_cookie,      "did not set 'sessionToken' cookie",            True),
+    ("login_post_failed",       _setup_post_failure,        "Login POST failed: ConnectionError",           False),
+    ("login_body_rejected",     _setup_login_rejected,      "Login failed: idloginincorrect",               True),
+    ("no_sid_in_response",      _setup_no_sid,              "SID not found in response",                    True),
+    ("login_page_network_error", _setup_network_error,      "Failed to fetch login page: ConnectionError",  False),
+    ("login_post_302_redirect",  _setup_login_post_redirect, "Login POST returned HTTP 302",                True),
 ]
 # fmt: on
 
 
 @pytest.mark.parametrize(
-    "desc,setup_fn,expected_error",
+    "desc,setup_fn,expected_error,expects_response",
     FAILURE_CASES,
     ids=[c[0] for c in FAILURE_CASES],
 )
@@ -218,8 +220,9 @@ def test_failure_scenario(
     desc: str,
     setup_fn: Any,
     expected_error: str,
+    expects_response: bool,
 ) -> None:
-    """Auth failure produces expected error message."""
+    """Auth failure produces expected error message and response state."""
     config = _make_config()
     manager = FormCbnAuthManager(config)
 
@@ -232,6 +235,7 @@ def test_failure_scenario(
 
     assert result.success is False
     assert expected_error in result.error
+    assert (result.response is not None) is expects_response
 
 
 # ---------------------------------------------------------------------------

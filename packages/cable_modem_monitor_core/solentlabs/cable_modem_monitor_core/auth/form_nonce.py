@@ -141,6 +141,7 @@ class FormNonceAuthManager(BaseAuthManager):
             return AuthResult(
                 success=False,
                 error=f"Login rejected: {error_msg}",
+                response=response,
             )
 
         redirect_hint = ""

@@ -371,6 +371,7 @@ def _validate_session(
         return AuthResult(
             success=False,
             error=(f"Session validation failed " f"(status {resp.status_code})"),
+            response=resp,
         )
     return None
 

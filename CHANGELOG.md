@@ -31,6 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Auth failure logs now surface response detail across all
+  strategies.** `_log_auth_failure_detail` (collector.py) reads
+  `auth_result.response` to emit sanitized request line + response
+  status/Content-Type + body snippet on auth failure. Six strategies
+  (`form_pbkdf2`, `form_sjcl`, `form_cbn`, `form_nonce`, `hnap`,
+  `url_token`) plus the shared `parse_json_dict` helper now populate
+  `response=` on failure paths where a `requests.Response` is in
+  scope; previously only `form` did, so contributors triaging auth
+  failures on any other strategy saw the no-response one-line
+  fallback. Related to #120 (CGA6444VF — first real-world test of
+  `form_pbkdf2`).
 - **Stale HNAP sessions now recover within the same poll.** When a
   cached HNAP session is rejected by the server (LOAD_AUTH on
   HTTP 401/404), the orchestrator clears the cached session and
