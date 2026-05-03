@@ -33,3 +33,7 @@ Related to #
 - [ ] Tested against real modem hardware (catalog PRs and Core parsing/auth changes)
 - [ ] Catalog PR: used `/modem-intake` or output matches its structure
 - [ ] Breaking change? Migration path described in the Description above
+
+---
+
+References: [Contributing Guide](../CONTRIBUTING.md) · [Release Process](../docs/reference/RELEASING.md) (version bump, release notes)
