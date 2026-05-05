@@ -99,7 +99,7 @@ def test_filter_blocks_record_through_logger() -> None:
     """
     captured: list[logging.LogRecord] = []
     handler = logging.Handler()
-    handler.emit = captured.append  # type: ignore[method-assign]
+    handler.emit = captured.append  # type: ignore[method-assign]  # replacing emit on a real Handler instance for capture; mypy can't model attribute replacement
 
     target = logging.getLogger("urllib3.connection")
     target.addHandler(handler)

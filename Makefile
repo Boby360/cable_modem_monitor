@@ -133,12 +133,13 @@ pii-check:
 	@$(VENV_BIN)/python packages/cable_modem_monitor_catalog/scripts/check_fixture_pii.py
 
 # Suppression-discipline scan — mirrors CI suppression-check job.
-# Scans the most recent commit's added lines for unjustified
+# Scans every commit on this branch since origin/main for unjustified
 # `# type: ignore` / `# pyright: ignore` / bare `# noqa` patterns.
-# See CLAUDE.md § Code Discipline (Suppression discipline).
+# Matches CI's diff scope (--branch origin/main) so local validation
+# catches what CI would. See CLAUDE.md § Code Discipline.
 suppression-check:
 	@echo "🔍 Scanning for unjustified suppressions..."
-	@$(VENV_BIN)/python scripts/check_suppression_discipline.py --branch HEAD~1
+	@$(VENV_BIN)/python scripts/check_suppression_discipline.py --branch origin/main
 
 # Catalog README freshness — mirrors CI catalog-readme job.
 catalog-readme-check:
