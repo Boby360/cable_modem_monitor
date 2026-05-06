@@ -31,6 +31,12 @@ class FormPbkdf2AuthManager(BaseAuthManager):
     def __init__(self, config: FormPbkdf2Auth) -> None:
         self._config = config
 
+    def headers(self) -> frozenset[str]:
+        names = {"cookie"}
+        if self._config.csrf_header:
+            names.add(self._config.csrf_header.lower())
+        return frozenset(names)
+
     def authenticate(
         self,
         session: requests.Session,
@@ -165,10 +171,10 @@ def _request_salts(
     )
     if isinstance(result, AuthResult):
         return result
-    _, salt_json = result
+    response, salt_json = result
 
     if not salt_json.get("salt"):
-        return AuthResult(success=False, error="No salt in server response")
+        return AuthResult(success=False, error="No salt in server response", response=response)
 
     return salt_json
 
@@ -195,7 +201,7 @@ def _submit_login(
     # Check HTTP-level failure before attempting JSON parse —
     # a 401 with an HTML body should not trigger a JSON parse error.
     if response.status_code == 401:
-        return AuthResult(success=False, error="Login returned 401 Unauthorized")
+        return AuthResult(success=False, error="Login returned 401 Unauthorized", response=response)
 
     result_json = parse_json_dict(response, context="Login response")
     if isinstance(result_json, AuthResult):
@@ -205,6 +211,7 @@ def _submit_login(
         return AuthResult(
             success=False,
             error=f"Login rejected: {result_json.get('message', 'unknown error')}",
+            response=response,
         )
 
     return response

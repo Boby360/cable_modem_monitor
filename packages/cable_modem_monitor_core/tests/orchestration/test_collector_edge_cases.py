@@ -24,12 +24,14 @@ from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
     HnapAuth,
     NoneAuth,
 )
+from solentlabs.cable_modem_monitor_core.models.modem_config.session import SessionConfig
 from solentlabs.cable_modem_monitor_core.orchestration.collector import (
     ModemDataCollector,
 )
 from solentlabs.cable_modem_monitor_core.orchestration.signals import (
     CollectorSignal,
 )
+from solentlabs.cable_modem_monitor_core.parsers.diagnostics import ParseDiagnostics
 
 # ------------------------------------------------------------------
 # Helpers
@@ -99,15 +101,12 @@ class TestSessionHeaders:
         config.transport = "http"
         config.timeout = 10
         config.auth = NoneAuth(strategy="none")
-        config.session = MagicMock()
-        config.session.max_concurrent = 0
-        config.session.headers = {"X-Custom": "value"}
+        config.session = SessionConfig(headers={"X-Custom": "value", "Referer": "{base_url}/"})
         config.actions = None
 
         collector = ModemDataCollector(config, None, None, "http://localhost", "", "")
-        # The headers should have been applied during __init__
-        # Verify by checking the session has the custom header
         assert collector._session.headers.get("X-Custom") == "value"
+        assert collector._session.headers.get("Referer") == "http://localhost/"
 
 
 # ------------------------------------------------------------------
@@ -165,10 +164,15 @@ class TestAuthContextUpdate:
         mock_context = AuthContext(private_key="test_key")
         mock_result = AuthResult(success=True, auth_context=mock_context)
 
+        empty_modem_data = {"downstream": [], "upstream": [], "system_info": {}}
         with (
             patch.object(collector._auth_manager, "authenticate", return_value=mock_result),
             patch.object(collector, "_load_resources", return_value=({}, [])),
-            patch.object(collector, "_parse", return_value={"downstream": [], "upstream": [], "system_info": {}}),
+            patch.object(
+                collector,
+                "_parse",
+                return_value=(empty_modem_data, ParseDiagnostics()),
+            ),
         ):
             result = collector.execute()
 
@@ -233,6 +237,7 @@ class TestHnapResourceLoading:
             private_key="test_private_key",
             hmac_algorithm="md5",
             timeout=10,
+            headers=frozenset({"cookie", "hnap_auth"}),
         )
         assert resources == {"hnap_data": "ok"}
         assert len(fetches) == 1
@@ -295,7 +300,7 @@ class TestHnapLogout:
         with (
             patch.object(collector, "authenticate", return_value=MagicMock(success=True)),
             patch.object(collector, "_load_resources", return_value=({}, [])),
-            patch.object(collector, "_parse", return_value=modem_data),
+            patch.object(collector, "_parse", return_value=(modem_data, ParseDiagnostics())),
             patch("solentlabs.cable_modem_monitor_core.orchestration.collector.execute_action") as mock_action,
         ):
             result = collector.execute()

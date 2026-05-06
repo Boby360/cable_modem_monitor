@@ -160,13 +160,14 @@ class CollectorSignal(Enum):
     context.
     """
 
-    OK = "ok"                        # Collection completed — modem_data is populated
-    AUTH_FAILED = "auth_failed"      # Wrong credentials or strategy mismatch
-    AUTH_LOCKOUT = "auth_lockout"    # Firmware anti-brute-force triggered
-    CONNECTIVITY = "connectivity"    # Connection refused, timeout, DNS failure
-    LOAD_ERROR = "load_error"        # HTTP error on data page (5xx, 404)
-    LOAD_AUTH = "load_auth"          # Session expired: HTTP 401/403, or HNAP HTTP error on reused session
-    PARSE_ERROR = "parse_error"      # Parser exception (malformed response)
+    OK = "ok"                          # Collection completed — modem_data is populated
+    AUTH_FAILED = "auth_failed"        # Wrong credentials or strategy mismatch
+    AUTH_LOCKOUT = "auth_lockout"      # Firmware anti-brute-force triggered
+    CONNECTIVITY = "connectivity"      # Connection refused, timeout, DNS failure
+    LOAD_ERROR = "load_error"          # HTTP error on data page (5xx, 404)
+    LOAD_AUTH = "load_auth"            # Session expired: HTTP 401/403, or HNAP HTTP error on reused session
+    LOAD_INTEGRITY = "load_integrity"  # HTTP 200 stub: parser found 0 of N expected anchors (login-page detection false negative)
+    PARSE_ERROR = "parse_error"        # Parser exception (malformed response)
 ```
 
 ### Signal → Policy Mapping (Orchestrator reference)
@@ -178,7 +179,8 @@ class CollectorSignal(Enum):
 | `AUTH_LOCKOUT` | Trip circuit breaker immediately, report `auth_failed` |
 | `CONNECTIVITY` | Abort, report `unreachable`, apply connectivity backoff |
 | `LOAD_ERROR` | Abort, report `unreachable` |
-| `LOAD_AUTH` | Clear session, report `auth_failed`, no retry |
+| `LOAD_AUTH` | Clear session, retry once in same poll, increment auth streak if retry fails, report `auth_failed` (see UC-17, UC-18) |
+| `LOAD_INTEGRITY` | Same as `LOAD_AUTH` — clear session, retry once in same poll, increment auth streak if retry fails, report `auth_failed` (see UC-19a) |
 | `PARSE_ERROR` | Abort, report `parser_issue` |
 
 ### State Ownership
@@ -213,6 +215,12 @@ Example — HNAP 404 on reused session:
 - **Signal**: `CollectorSignal.LOAD_AUTH`
 - **ModemResult.error**: `"HNAP HTTP 404 — session expired"`
 
+Example — stub response (login-page detection false negative):
+
+- **Log** (WARNING): `"Stub response on /status.html [MODEL] — 0 of 4 expected parser anchors found, treating as session integrity failure"`
+- **Signal**: `CollectorSignal.LOAD_INTEGRITY`
+- **ModemResult.error**: `"0 of 4 expected anchors on /status.html — stub response"`
+
 Example — successful collection with no channels:
 
 - **Log** (INFO): `"Parse complete [MODEL]: 0 DS, 0 US channels"`
@@ -223,10 +231,14 @@ Example — successful collection with no channels:
 
 | Tier | Level | When | Purpose |
 |------|-------|------|---------|
-| Pulse | INFO always | Every successful poll | `"Parse complete [MODEL]: 24 DS, 4 US"` — heartbeat showing the modem is alive and parsing |
+| Pulse | INFO first poll, DEBUG after | Successful poll summaries | `"Parse complete [MODEL]: 24 DS, 4 US"` — visible at INFO for first-poll confirmation, then DEBUG in steady-state to keep success-path logs quiet |
 | Auth/resource | INFO first poll, DEBUG after | Steady-state noise reduction | Auth strategy, session state, resource loading. Visible at INFO for first-poll diagnostics, drops to DEBUG after to avoid flooding multi-modem logs |
 | Failures | WARNING/ERROR always | Never demoted | Auth failures, connectivity errors, parse errors. Always visible regardless of poll count |
 | Wire data | DEBUG always | Troubleshooting only | Request/response details, parsing internals |
+
+Status transitions and adaptive-reuse state changes stay at INFO even
+after the first poll. These are operator-relevant events, not
+steady-state heartbeat logs.
 
 ### Auth Log Level
 
@@ -286,6 +298,27 @@ failure ``AuthResult`` so the collector can render the detail.
 See ARCHITECTURE_DECISIONS.md § "Auth-failure detail via single
 WARNING log" for the design rationale (replaces an earlier session-
 adapter capture mechanism that was over-engineered for the goal).
+
+#### AuthResult Reuse Contract (success path)
+
+On the **success** path, ``AuthResult.response`` and
+``AuthResult.response_url`` advertise an auth-response-reuse
+opportunity to the loader. The loader decodes ``response.text`` as
+the data page for ``response_url`` and skips re-fetching that path.
+
+These fields MUST be set only when the login response body is itself
+a parser-consumable data page for ``response_url``. Strategies that
+return opaque artefacts (session tokens in the body, empty bodies,
+non-data-page redirect landings) MUST leave both fields unset.
+Violating this contract surfaces the auth artefact as the parsed
+data page and silently produces empty results.
+
+The contract is canonically documented in the ``AuthResult``
+docstring (``auth/base.py``) and replicated in
+``RESOURCE_LOADING_SPEC.md`` § Auth Response Reuse. Each auth
+strategy unit-tests both branches (positive: data-page advertises
+reuse; negative: artefact branches do not). Adding a new auth
+strategy requires both tests. Regression: SB8200 #81.
 
 ### Exceptions
 
@@ -779,12 +812,19 @@ class OrchestratorDiagnostics:
             reachable.
         connectivity_backoff_remaining: Polls to skip before next
             connection attempt. 0 when no backoff active.
+        stale_session_recovery_streak: Consecutive recovered stale-
+            session events. Increments when a LOAD_AUTH same-poll
+            retry succeeds and resets on an intervening normal success
+            or unrecovered failure.
+        session_reuse_disabled: Whether the orchestrator has disabled
+            cached-session reuse for the rest of this runtime after
+            repeated consecutive stale-session recoveries.
         resource_fetches: Per-resource timing and size from the last
             successful collection. Empty list if never polled or
             collection failed before resource loading. Consumers
             compute aggregates (min/max/avg) from this raw data.
-        last_poll_timestamp: Monotonic time of last get_modem_data()
-            call. None if never polled.
+        last_poll_at: ISO 8601 wall-clock timestamp (UTC) of the last
+            ``get_modem_data()`` call. None if never polled.
 
     Note: auth-failure wire detail is not stored on this dataclass.
     The collector emits a single sanitized ``WARNING`` log when
@@ -799,8 +839,10 @@ class OrchestratorDiagnostics:
     auth_strategy: str = ""
     connectivity_streak: int = 0
     connectivity_backoff_remaining: int = 0
+    stale_session_recovery_streak: int = 0
+    session_reuse_disabled: bool = False
     resource_fetches: list[ResourceFetch] = field(default_factory=list)
-    last_poll_timestamp: float | None = None
+    last_poll_at: str | None = None
 
 
 class ConnectionStatus(Enum):
@@ -1148,15 +1190,33 @@ identify root cause without reading code. The auth failure streak
 count appears in every auth-related log so the progression is visible
 in a linear log scan.
 
-**Two steady-state INFO lines per poll cycle (the "pulse"):**
+**Steady-state success-path logs are DEBUG.** All success-path
+orchestration logs — auth, resource loading, session state, parse
+completion — fire at INFO on the first poll and drop to DEBUG after.
+The first poll lands first-install diagnostics in the default log
+view without requiring DEBUG; subsequent polls go quiet to avoid
+flooding multi-modem logs.
 
-1. `"Poll [MODEL] — auth: FormAuth, url: http://..., credentials: yes, session: cached"` (first poll only; DEBUG after)
-2. `"Parse complete [MODEL]: 24 DS, 4 US channels"` (every poll — the heartbeat)
+**Operator-relevant transitions stay at INFO** regardless of poll
+count: status transitions, adaptive-reuse state changes, counter
+resets, recovery events, modem reboots. These are not steady-state
+heartbeat logs — they reflect changes the user benefits from seeing.
 
-The parse line is the integration's pulse. In a multi-modem setup,
-each modem produces one INFO line per 10-minute poll. All other
-orchestration logging (auth, resource loading, session state) drops
-to DEBUG after the first successful poll to avoid flooding logs.
+**Liveness confirmation without DEBUG:** users have two paths to
+verify the integration is polling without enabling DEBUG logging:
+
+1. **Integration UI** — Settings → Devices & Services → Cable Modem
+   Monitor → Download Diagnostics. The JSON dump includes
+   `last_poll_at`, streak counters, reuse state, and channel counts.
+2. **Settings change** — temporarily enable DEBUG logging via
+   Settings → System → Logs to surface per-poll detail.
+
+**First-poll trigger** — the "first poll INFO" mode fires on:
+fresh install, reconfigure (entry reload), HA server start/restart
+(orchestrator instance recreation), and `reset_auth()` (user-triggered
+reauth). Modem reboot is not in this list — it gets its own one-line
+INFO event ("Counter reset detected …") and does not trigger verbose
+first-poll output.
 
 **Auth lifecycle:**
 
@@ -1171,9 +1231,9 @@ to DEBUG after the first successful poll to avoid flooding logs.
 
 **Collection outcomes:**
 
-- INFO: `"Parse complete [MODEL]: 24 DS, 4 US channels"` (every poll)
+- INFO (first poll) / DEBUG (after): `"Parse complete [MODEL]: 24 DS, 4 US channels"`
 - WARNING: `"Poll failed [MODEL] — signal: connectivity, error: ..."`
-- INFO: `"Counter reset detected [MODEL] — corrected: 1000→0, uncorrected: 50→0"`
+- INFO: `"Counter reset detected [MODEL] — corrected: 1000→0, uncorrected: 50→0"` (modem reboot — operator-relevant transition, never demoted)
 
 **State transitions:**
 
@@ -1196,55 +1256,57 @@ across polls.
 
 Lightweight health probe that runs alongside data collection.
 Determines whether the modem is network-reachable without triggering
-a full authentication and parse cycle. All three probes serve the
-same goal — check modem health with the minimum possible impact.
+a full authentication and parse cycle. The probes serve the same
+goal — check modem health with the minimum possible impact.
 
 The orchestrator notifies the HealthMonitor when data collections
-start and end. The HTTP probe is skipped when a collection is active
-(avoids contention on the modem's web server) or recently succeeded
-(redundant — the collection already proved HTTP reachability). See
-Collection Evidence below.
+start and end. TCP and HEAD probes are skipped when a collection is
+active (avoids contention on the modem's web server) or recently
+succeeded (redundant — the collection already proved L4/HTTP
+reachability). See Collection Evidence below.
 
 ### Probe Strategy
 
-Three probes, ordered lightest to heaviest. Each tests a different
-layer of the modem's stack:
+Three independent probes, each testing a different layer of the
+modem's stack:
 
-| Probe | Layer | What it proves | Impact |
-|-------|-------|---------------|--------|
-| ICMP ping | Network | IP stack responds | Zero — no web server involvement |
-| TCP connect | Transport | TCP stack accepts connections | Minimal — SYN/ACK only, no HTTP |
-| HTTP HEAD | Application | Web server responds | Minimal — no response body |
-| HTTP GET | Application | Web server responds (fallback) | Light — response body discarded |
+| Probe | Layer | What it proves | Affects status? |
+|-------|-------|---------------|-----------------|
+| ICMP ping | Network (L3) | IP stack responds | Yes |
+| TCP connect | Transport (L4) | TCP stack accepts connections | Yes |
+| HTTP HEAD | Application | Web server responds without invoking the handler | No (latency-only) |
 
-**Probe order:** ICMP first (if supported), then TCP + HTTP (if
-enabled). Both ICMP and HTTP run regardless of the other's result
-— the combination determines health status.
+**Probe order:** ICMP first (if supported), then HEAD (if supported
+and HTTP probe enabled), then TCP (if HTTP probe enabled). HEAD runs
+before TCP so the modem's web server gets an uncontested connection
+— embedded modems are often single-threaded and degrade if a TCP
+probe is still being cleaned up.
 
-**TCP/HTTP timing split:** The HTTP probe measures two things
-separately: TCP connection setup time (network overhead) and HTTP
-server response time (modem load). A standalone
-`socket.create_connection()` measures the TCP handshake before the
-HTTP request. The session's `response.elapsed` (which includes its
-own TCP handshake because the connection pool is always cold between
-probes) minus the TCP measurement yields the pure server response
-time.
+**Status uses ICMP + TCP only.** HEAD timing is a latency-only
+signal that populates `http_latency_ms` when available; HEAD failure
+does not change status. Application-layer issues that don't break
+TCP listening surface via the next slow-poll instead.
 
-- `http_latency_ms` in `HealthInfo` stores **server response time
-  only** — the modem load indicator consumers care about.
-- TCP connect time is **diagnostic logging only** — visible in logs
-  for troubleshooting but not persisted or exposed as a sensor.
+**TCP/HEAD timing split:** When both run, the HEAD probe records
+total elapsed time (which includes its own TCP handshake because the
+connection pool is always cold between probes). The dedicated TCP
+probe measures the handshake separately. Subtracting yields the
+modem's pure server response time, stored in `http_latency_ms`.
 
-This separation matters because a 100ms health check reading could
-mean "modem under load" (TCP 2ms, HTTP 98ms) or "network hiccup"
-(TCP 97ms, HTTP 3ms). Without the split, these are indistinguishable.
+- `tcp_latency_ms` in `HealthInfo` is the dedicated TCP handshake
+  measurement — the L4 reachability signal.
+- `http_latency_ms` is the **server response time** (HEAD elapsed
+  minus TCP handshake) — populated only when HEAD ran successfully.
 
-**HTTP method selection:** HEAD is preferred (lightest). Some modems
-return 405 Method Not Allowed or behave unexpectedly with HEAD. When
-`supports_head=False`, the monitor uses GET instead (response body
-is discarded — only the server response time matters).
+**HEAD-or-skip, no GET fallback:** HEAD bypasses the CGI handler on
+properly-implementing webservers, giving a clean unimodal latency
+signal. When `supports_head=False`, the HEAD probe is **skipped
+entirely** — a fallback to GET is intentionally avoided because GET
+timing is bimodal on most embedded modems (cold compute path vs warm
+cached path) and would corrupt the metric. GET-only modems still
+get TCP latency for L4 reachability and ICMP for L3.
 
-**The HTTP probe is a connectivity check, not a content check.**
+**The HEAD probe is a connectivity check, not a content check.**
 Any response — 200, 302, 401 — means the modem's web server is
 alive. Redirects are not followed (`allow_redirects=False`); a 3xx
 is as valid a sign of life as a 200. The probe uses a pre-configured
@@ -1263,14 +1325,18 @@ and passes the results to the HealthMonitor constructor.
 
 Discovery sequence (run once during setup):
 
-1. **Protocol** — `detect_protocol()` tries HTTP → HTTPS →
-   HTTPS+SECLEVEL=0. Determines `protocol` and `legacy_ssl`.
+1. **Protocol** — `detect_protocol()` TCP-probes ports 80 and 443
+   and, when 443 is open, performs a TLS handshake using a
+   broad-cipher (`SECLEVEL=0`) context. HTTPS is preferred whenever
+   the handshake completes; `legacy_ssl` is set from the negotiated
+   TLS version (TLSv1.1 or older → True). Determines `protocol` and
+   `legacy_ssl` without sending any HTTP requests.
 2. **ICMP** — ping the modem IP. Success → `supports_icmp=True`.
    Timeout or error → `supports_icmp=False` (network blocks ICMP).
 3. **HTTP HEAD** — HEAD request to `base_url`. Normal response
    (2xx, 3xx) → `supports_head=True`. 405 Method Not Allowed or
    unexpected behavior → `supports_head=False` (modem rejects HEAD,
-   fall back to GET).
+   so the HEAD probe is skipped at runtime — no GET fallback).
 
 The user never sees or configures these flags. The setup flow
 tests what works and passes the results through. The HealthMonitor
@@ -1292,43 +1358,45 @@ traffic between collections.
 ### Probe Configurations
 
 Modem and network capabilities determine which probes are available.
-This changes what health states the monitor can distinguish:
+Status derivation uses ICMP (L3) and TCP (L4) — the modem-load HEAD
+signal is latency-only and does not affect status:
 
-**ICMP + HTTP (full visibility)**
-Both probes run. All four health states are distinguishable.
-This is the default configuration.
+**ICMP + TCP (full visibility)**
+Both reachability probes run. All four health states are
+distinguishable. This is the default configuration.
 
-| ICMP | HTTP | Status | Meaning |
-|------|------|--------|---------|
+| ICMP | TCP | Status | Meaning |
+|------|-----|--------|---------|
 | pass | pass | `responsive` | Modem is healthy |
-| pass | fail | `degraded` | Network OK, web server unresponsive |
-| fail | pass | `icmp_blocked` | Web server OK, network blocks ICMP |
+| pass | fail | `degraded` | Network OK, modem L4 stack not accepting |
+| fail | pass | `icmp_blocked` | Modem reachable at L4, network blocks ICMP |
 | fail | fail | `unresponsive` | Modem is down |
 
-**HTTP only** (`supports_icmp=False`)
-Network blocks ICMP. Only the application layer is tested. Cannot
-distinguish "web server up but ICMP blocked" from "fully healthy"
-— but that's fine, because ICMP is blocked on this network
-regardless of modem state.
+**TCP only** (`supports_icmp=False`)
+Network blocks ICMP. Only the L4 layer is tested. Cannot distinguish
+"modem reachable but ICMP blocked" from "fully healthy" — but
+that's fine, because ICMP is blocked on this network regardless of
+modem state.
 
-| ICMP | HTTP | Status | Meaning |
-|------|------|--------|---------|
-| N/A | pass | `responsive` | Web server responds — modem is up |
-| N/A | fail | `unresponsive` | Web server down — modem may be down |
+| ICMP | TCP | Status | Meaning |
+|------|-----|--------|---------|
+| N/A | pass | `responsive` | Modem L4 stack responds |
+| N/A | fail | `unresponsive` | Modem L4 stack down — modem may be down |
 
 Lost visibility: cannot detect `degraded` (ICMP would distinguish
-"network reachable but web server hung" from "completely down").
+"network reachable but TCP listen unhappy" from "completely down").
 
 **ICMP only** (`http_probe=False`)
 Modem.yaml sets `health.http_probe: false` for fragile modems where
-even GET health probes carry risk (e.g., S33v2 firmware that crashes
-under HTTP load). HTTP probes are permanently disabled. Only ICMP
-runs between data collections.
+even TCP/HEAD probes between collections carry risk (e.g., S33v2
+firmware that crashes under additional HTTP load). All non-ICMP
+probes are permanently disabled. Only ICMP runs between data
+collections.
 
-| ICMP | HTTP | Status | Meaning |
-|------|------|--------|---------|
+| ICMP | TCP | Status | Meaning |
+|------|-----|--------|---------|
 | pass | (disabled) | `responsive` | Network OK, modem reachable |
-| fail | (disabled) | `icmp_blocked` | ICMP blocked, no application-layer probe |
+| fail | (disabled) | `unresponsive` | ICMP blocked, no L4 probe |
 
 Lost visibility: if the collector fails AND ICMP is the only probe,
 we can only detect network-layer outages. Application-layer health
@@ -1342,9 +1410,16 @@ should be rare — if ICMP is blocked and HTTP is disabled, the
 health monitor provides no value and the consumer may choose not
 to schedule health checks at all.
 
-| ICMP | HTTP | Status |
-|------|------|--------|
+| ICMP | TCP | Status |
+|------|-----|--------|
 | N/A | N/A | `unknown` |
+
+**HEAD latency signal availability** is orthogonal to status:
+`http_latency_ms` is populated when `supports_head=True` AND the
+HEAD probe ran successfully (no skip, HEAD didn't fail). On modems
+with `supports_head=False`, HEAD is never run and `http_latency_ms`
+is always None — by design, since the only way to populate it would
+be a fallback to GET, which produces bimodal corrupted data.
 
 ### Public API
 
@@ -1379,7 +1454,8 @@ class HealthMonitor:
             supports_head: Whether the modem handles HTTP HEAD correctly.
                 Discovered during setup — False if the modem returns
                 405 or unexpected responses to HEAD. When False, the
-                HTTP probe uses GET instead (response body discarded).
+                HEAD probe is skipped entirely (no GET fallback —
+                GET timing is bimodal and would corrupt the metric).
             http_probe: Whether to run HTTP health probes at all. When
                 False, only ICMP probes run (if supported). Defaults
                 to True. Set to False via modem.yaml health.http_probe
@@ -1395,8 +1471,8 @@ class HealthMonitor:
         """Signal that a data collection cycle is starting.
 
         Called by the orchestrator before collector.execute().
-        While active, ping() skips the HTTP probe to avoid
-        contention on the modem's web server.
+        While active, ping() skips the TCP and HEAD probes to
+        avoid contention on the modem's web server.
         """
 
     def record_collection_end(self, success: bool) -> None:
@@ -1405,7 +1481,7 @@ class HealthMonitor:
         Called by the orchestrator after collector.execute()
         completes (success or failure). A successful collection
         is recorded so the next ping() can skip the redundant
-        HTTP probe.
+        TCP and HEAD probes.
         """
 
     def ping(self, *, force_fresh: bool = False) -> HealthInfo:
@@ -1413,19 +1489,22 @@ class HealthMonitor:
 
         Runs enabled probes and returns a combined result:
         1. ICMP ping (if supports_icmp) — network-layer check
-        2. HTTP HEAD or GET (if http_probe is enabled AND no
-           collection evidence suppresses it)
+        2. HTTP HEAD (if supports_head AND http_probe AND no
+           collection evidence suppresses it) — latency only
+        3. TCP connect (if http_probe AND no collection evidence
+           suppresses it) — L4 reachability check
 
-        The HTTP probe is skipped when a data collection is active
-        or recently succeeded — the collection already proves HTTP
-        reachability. When skipped, collection evidence substitutes
-        for the HTTP probe in status derivation but http_latency_ms
-        stays None (not measured, not fabricated). See Collection
+        TCP and HEAD share the skip gate — both are skipped when a
+        data collection is active or recently succeeded, since the
+        collection already proves L4/HTTP reachability. When
+        skipped, collection evidence substitutes for the TCP probe
+        in status derivation but tcp_latency_ms / http_latency_ms
+        stay None (not measured, not fabricated). See Collection
         Evidence below.
 
         ``force_fresh=True`` bypasses the collection-evidence skip
-        and always runs the HTTP probe. Used by restart recovery
-        (``_probe_for_response``) where a cached pre-reboot HTTP
+        and always runs TCP and HEAD probes. Used by restart
+        recovery (``_probe_for_response``) where cached pre-reboot
         success would falsely report the modem as responsive while
         it is still in the middle of a reboot.
 
@@ -1459,27 +1538,33 @@ class HealthInfo:
     means "not measured."
 
     Attributes:
-        health_status: Derived status from probe combination and
+        health_status: Derived status from ICMP + TCP results and
             collection evidence.
         icmp_latency_ms: Round-trip time in milliseconds. None if
             ICMP failed, not supported, or not attempted.
+        tcp_latency_ms: TCP handshake time in milliseconds to the
+            modem's web port. The L4 reachability signal. None if
+            the TCP probe failed or was not attempted.
         http_latency_ms: HTTP server response time in milliseconds,
-            excluding TCP connection setup overhead. Reflects modem
-            web-server load. None if HTTP failed, not attempted, or
-            suppressed by collection evidence.
+            excluding TCP connection setup overhead. Populated only
+            on modems where supports_head=True (HEAD bypasses the
+            handler and gives a clean unimodal signal). None on
+            GET-only modems, HEAD failure, or when suppressed by
+            collection evidence.
     """
 
     health_status: HealthStatus
     icmp_latency_ms: float | None = None
+    tcp_latency_ms: float | None = None
     http_latency_ms: float | None = None
 
 
 class HealthStatus(Enum):
-    """Modem health derived from probe results."""
+    """Modem health derived from ICMP + TCP probe results."""
 
-    RESPONSIVE = "responsive"        # HTTP responds (modem web server is up)
-    DEGRADED = "degraded"            # ICMP works, HTTP fails (web server hung?)
-    ICMP_BLOCKED = "icmp_blocked"    # HTTP works, ICMP fails (network blocks ICMP)
+    RESPONSIVE = "responsive"        # ICMP and TCP both pass
+    DEGRADED = "degraded"            # ICMP works, TCP fails (modem L4 stack issue)
+    ICMP_BLOCKED = "icmp_blocked"    # TCP works, ICMP fails (network blocks ICMP)
     UNRESPONSIVE = "unresponsive"    # Neither responds (modem is down)
     UNKNOWN = "unknown"              # No probes enabled or run
 ```
@@ -1489,10 +1574,16 @@ class HealthStatus(Enum):
 See Probe Configurations above for the full derivation tables per
 configuration. The general rule:
 
-- **HTTP pass** → modem is up (web server responds)
-- **HTTP fail + ICMP pass** → modem is reachable but web server is hung
+- **ICMP pass + TCP pass** → modem is up
+- **ICMP pass + TCP fail** → modem reachable at L3 but L4 stack not accepting
+- **ICMP fail + TCP pass** → modem reachable, network blocks ICMP
 - **Both fail** → modem is down
 - **N/A** (probe not run) → that layer isn't tested, derive from what's available
+
+HEAD timing is **not** part of status derivation. HEAD failure on a
+HEAD-capable modem is logged but does not degrade the status — slow
+poll catches application-layer issues. This keeps the status signal
+purely about reachability.
 
 ### Collection Evidence
 
@@ -1510,29 +1601,30 @@ via two fields:
 - `_last_collection_success` (monotonic timestamp) — set when a
   collection succeeds.
 
-**HTTP probe suppression:** `ping()` skips the HTTP probe when:
+**TCP/HEAD probe suppression:** `ping()` skips both TCP and HEAD
+probes when:
 
 1. **Collection is active** — the modem is already handling HTTP
-   traffic from the data poll. Running an HTTP health probe would
+   traffic from the data poll. Running additional probes would
    compete for the modem's web server and produce misleadingly slow
    latency values.
-2. **Collection succeeded since the previous `ping()`** — HTTP
+2. **Collection succeeded since the previous `ping()`** — L4/HTTP
    reachability was already proven. The evidence is consumed once:
-   the first `ping()` after a successful collection skips HTTP; the
-   next `ping()` runs HTTP normally.
+   the first `ping()` after a successful collection skips both TCP
+   and HEAD; the next `ping()` runs them normally.
 
 **Baseline guarantee:** The very first `ping()` call never skips
-HTTP, regardless of collection state. Consumers (e.g., HA sensor
-entities) need at least one real HTTP measurement to establish a
-baseline value. Without this, the first health check after startup
-would report `http_latency_ms=None`, which charts as 0.
+TCP/HEAD, regardless of collection state. Consumers (e.g., HA
+sensor entities) need at least one real measurement to establish
+baseline values.
 
-**Status derivation with evidence:** When the HTTP probe is skipped,
-collection evidence substitutes as `http_ok=True` in the status
-derivation matrix. The status reflects that the modem is HTTP-
-reachable, but `http_latency_ms` stays `None` (not measured).
+**Status derivation with evidence:** When TCP/HEAD are skipped,
+collection evidence substitutes as `tcp_ok=True` in the status
+derivation matrix. The status reflects that the modem is L4-
+reachable, but `tcp_latency_ms` and `http_latency_ms` stay `None`
+(not measured).
 
-| ICMP | HTTP probe | Collection evidence | Status |
+| ICMP | TCP probe | Collection evidence | Status |
 |------|-----------|-------------------|--------|
 | pass | skipped | active or recent success | `responsive` |
 | fail | skipped | active or recent success | `icmp_blocked` |
@@ -1542,25 +1634,25 @@ reachable, but `http_latency_ms` stays `None` (not measured).
 and provides network-layer visibility regardless of collection
 activity.
 
-**Logging:** The log detail shows TCP and HTTP timing separately
-when the HTTP probe runs. TCP connect time is diagnostic-only —
-it is not stored in `HealthInfo`:
+**Logging:** The log detail shows ICMP, TCP, and HEAD timing
+separately when probes run:
 
 ```text
-Health check [MODEL]: responsive (ICMP 1.5ms, TCP 1.8ms, HTTP GET 4.3ms, 4820 bytes)
+Health check [MODEL]: responsive (ICMP 1.5ms, TCP 1.8ms, HTTP HEAD 4.3ms, 0 bytes)
 ```
 
-When the HTTP probe is skipped, the log shows the skip reason
-instead (no TCP probe runs):
+On GET-only modems (`supports_head=False`), the HEAD entry is
+omitted (only ICMP and TCP appear). When TCP/HEAD are skipped, the
+log shows the skip reason:
 
 ```text
-Health check [MODEL]: responsive (ICMP 1.5ms, HTTP skipped (collection active))
-Health check [MODEL]: responsive (ICMP 1.5ms, HTTP skipped (recent collection))
+Health check [MODEL]: responsive (ICMP 1.5ms, TCP/HEAD skipped (collection active))
+Health check [MODEL]: responsive (ICMP 1.5ms, TCP/HEAD skipped (recent collection))
 ```
 
-`collection active` means the probe was skipped to avoid contention
+`collection active` means the probes were skipped to avoid contention
 during an in-progress collection. `recent collection` means a
-collection succeeded since the last ping, making the probe redundant.
+collection succeeded since the last ping, making them redundant.
 
 ### State Ownership
 
@@ -1572,9 +1664,9 @@ via `record_collection_start()` / `record_collection_end()`.
 | State | Purpose | Lifetime |
 |-------|---------|----------|
 | Last probe result | `latest` property — read by orchestrator during get_modem_data() | Updated each `ping()` call |
-| HTTP method | HEAD or GET based on supports_head | HealthMonitor lifetime |
-| Collection active | Suppresses HTTP probe during data poll | Between start/end signals |
-| Last collection success | Suppresses HTTP probe after successful poll | Updated on successful collection end |
+| supports_head | Gates whether the HEAD probe runs (no GET fallback) | HealthMonitor lifetime |
+| Collection active | Suppresses TCP/HEAD probes during data poll | Between start/end signals |
+| Last collection success | Suppresses TCP/HEAD probes after successful poll | Updated on successful collection end |
 | Last ping time | Determines if collection evidence is fresh | Updated at end of each `ping()` call |
 
 ### Consumer Entity Guidance

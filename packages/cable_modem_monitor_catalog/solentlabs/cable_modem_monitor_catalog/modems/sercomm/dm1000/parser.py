@@ -1,12 +1,15 @@
-"""PostProcessor for {manufacturer}/{model} — OFDMA and system_info extraction.
+"""PostProcessor for Sercomm DM1000 — OFDMA and system_info extraction.
 
 Extends the parser.yaml-driven extraction with two hooks:
 
-- ``parse_upstream``: appends OFDMA channels from RF_US_31_param
-  (transposed name/index format — can't be expressed declaratively)
+- ``parse_upstream``: appends OFDMA channels from RF_US_31_param. The
+  pivot from name+indexN rows is delegated to Core via the public
+  ``post_processor_helpers.transpose_indexed_rows`` helper; this hook
+  keeps only the firmware-specific filter (``Power == "ON"`` and
+  ``"OPERATE" in STATE``) and the OFDMA channel build.
 - ``parse_system_info``: extracts firmware, hardware, vendor, and
   build info from Version_Info (prefix-parsing — can't be expressed
-  declaratively)
+  declaratively).
 
 OFDM downstream channels are fully declarative in parser.yaml via
 per-array resources.
@@ -16,6 +19,10 @@ from __future__ import annotations
 
 import re
 from typing import Any
+
+from solentlabs.cable_modem_monitor_core.post_processor_helpers import (
+    transpose_indexed_rows,
+)
 
 # Resource endpoints.
 _VERSION_INFO = "/setup.cgi?todo=Version_Info"
@@ -45,12 +52,12 @@ class PostProcessor:
     ) -> list[dict[str, Any]]:
         """Append OFDMA upstream channels from RF_US_31_param.
 
-        The RF_US_31_param response uses a transposed format where each
-        row is a parameter name and columns (index1, index2, ...) are
-        channels. Only active channels (Power=ON, STATE=OPERATE) are
-        included.
+        Only active channels (Power=ON, STATE contains OPERATE) are
+        included. The STATE substring check is firmware-specific and
+        not expressible via declarative ``filter:`` operators today.
         """
-        per_channel = _transpose_nodes(resources, _OFDMA_US)
+        rows = resources.get(_OFDMA_US, {}).get("nodes", [])
+        per_channel = transpose_indexed_rows(rows)
         for ch_data in per_channel:
             if ch_data.get("Power") != "ON":
                 continue
@@ -58,12 +65,17 @@ class PostProcessor:
             if "OPERATE" not in state:
                 continue
 
-            freq_mhz = float(ch_data.get("Center Freq SC0", "0"))
+            # "Center Freq SC0" is the only OFDMA frequency-shaped value
+            # sercomm exposes; semantic is sercomm-specific and likely the
+            # CMTS-assigned channel placement frequency rather than the
+            # active-band lower edge required by FIELD_REGISTRY.md §
+            # frequency semantics. Not mapping to canonical `frequency`
+            # until hardware verification clarifies. See parser.yaml's
+            # OFDM section for the parallel reasoning.
             channels.append(
                 {
                     "channel_id": int(ch_data.get("CH", "0")),
                     "channel_type": "ofdma",
-                    "frequency": int(freq_mhz * 1_000_000),
                     "power": float(ch_data.get("rep power", "0")),
                 }
             )
@@ -75,7 +87,7 @@ class PostProcessor:
         resources: dict[str, Any],
     ) -> dict[str, Any]:
         """Extract system_info from the Version_Info response."""
-        items = _get_nodes(resources, _VERSION_INFO)
+        items = resources.get(_VERSION_INFO, {}).get("nodes", [])
 
         for item in items:
             _extract_info_fields(item, system_info)
@@ -87,46 +99,6 @@ class PostProcessor:
                 system_info["firmware_build_time"] = fwbt
 
         return system_info
-
-
-def _get_nodes(resources: dict[str, Any], endpoint: str) -> list[dict[str, Any]]:
-    """Extract the nodes list from a resource endpoint."""
-    data = resources.get(endpoint)
-    if data is None:
-        return []
-    nodes: list[dict[str, Any]] = data.get("nodes", [])
-    return nodes
-
-
-def _transpose_nodes(
-    resources: dict[str, Any],
-    endpoint: str,
-) -> list[dict[str, Any]]:
-    """Transpose a name/indexN pivot table into per-channel dicts.
-
-    Input rows:  ``{"name": "CH", "index1": "0", "index2": "1"}``
-    Output:      ``[{"CH": "0"}, {"CH": "1"}]``
-
-    Dynamically detects ``indexN`` keys so firmware changes that add
-    channels are handled without code updates.
-    """
-    nodes = _get_nodes(resources, endpoint)
-    if not nodes:
-        return []
-
-    # Detect column keys (index1, index2, ...) from the first row.
-    col_keys = sorted(k for k in nodes[0] if k.startswith("index"))
-    if not col_keys:
-        return []
-
-    result: list[dict[str, str]] = [{} for _ in col_keys]
-    for row in nodes:
-        name = row.get("name", "")
-        for i, col_key in enumerate(col_keys):
-            value = row.get(col_key, "")
-            result[i][name] = value.strip() if isinstance(value, str) else value
-
-    return result
 
 
 def _extract_info_fields(item: dict[str, Any], system_info: dict[str, Any]) -> None:

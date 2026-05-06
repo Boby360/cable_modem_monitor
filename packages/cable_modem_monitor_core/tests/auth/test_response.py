@@ -113,6 +113,7 @@ class TestParseJsonDict:
         assert result.success is False
         assert "not valid json" in result.error.lower()
         assert "Login Required" in result.error
+        assert result.response is resp
 
     # ┌───────────────────────────────────┬──────────┬──────────────────┬───────────────────┐
     # │ json_value                        │ exp_type │ exp_preview      │ description       │
@@ -156,6 +157,7 @@ class TestParseJsonDict:
         assert "expected json object" in result.error.lower()
         assert expected_type in result.error
         assert expected_preview in result.error
+        assert result.response is resp
 
     def test_long_string_preview_truncated(self) -> None:
         """Long non-dict string values are truncated in the error."""

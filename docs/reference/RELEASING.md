@@ -11,9 +11,20 @@ Releases follow a PR-based workflow:
 3. **Merge to main** → Creates clean history
 4. **Tag main** → Triggers GitHub release workflow
 
+## Key Rules
+
+- **CI runs on push. Publishing runs on tag push.** Don't skip the tag.
+- **Never manually edit version numbers.** Use `scripts/release.py`.
+- **Never run `gh release create` manually.** Let CI handle it.
+- **Dogfood on local HA** before stable releases (maintainer launches,
+  not automated).
+
 ## Step-by-Step Release
 
 ### 1. Prepare the Release (on feature branch)
+
+Before running the release script, run `.venv/bin/pip list --outdated`
+and batch-update anything safe — releases shouldn't ship with stale deps.
 
 ```bash
 # Ensure you're on your feature branch with all changes committed
@@ -184,6 +195,72 @@ We follow [Semantic Versioning](https://semver.org/):
 - **MAJOR** (X.0.0): Breaking changes
 - **MINOR** (0.X.0): New features, backward compatible
 - **PATCH** (0.0.X): Bug fixes, backward compatible
+
+## Branching and Merging
+
+### Applying a fix to multiple feature branches: rebase, don't cherry-pick
+
+When the same fix needs to land on multiple in-flight feature branches
+(e.g., v3.11.0 and v3.12.0):
+
+1. Commit the fix to the base branch first (e.g., v3.11.0).
+2. Rebase the child branch onto the updated parent:
+   `git checkout feature/v3.12.0 && git rebase feature/v3.11.0`
+3. Force push the rebased branch: `git push --force-with-lease`
+
+Cherry-picking creates duplicate commits with different SHAs; when the
+branches eventually merge to main, you get duplicate history or merge
+conflicts. The exception is backporting to *unrelated* branches (e.g.,
+a hotfix into an older release line) — cherry-pick is fine there.
+
+### Release branches → main: merge commits, not squash
+
+- Preserves release branch history.
+- Child branches rebase cleanly without "skipped commit" noise.
+- Shows clear release boundaries in `git log`.
+
+### Beta → main merges are contributor-onboarding-driven
+
+Whether to open a beta-to-main merge PR after each beta tag turns
+on **contributor-onboarding pressure**, not a blanket "always
+merge" rule. The default GitHub view of the repo shows `main`;
+contributors landing on the catalog README, contributor docs, or
+intake tooling see whatever is on `main`. When the canonical view
+is stale relative to current pipeline reality, contributors start
+on outdated docs and friction accumulates.
+
+**Merge a given beta to main when:** the beta contains
+contributor-facing doc or tool changes that should be visible at
+the canonical GitHub URL. Examples:
+
+- Catalog README updates (new confirmed modems, chipset metadata,
+  badge changes)
+- `cable_modem_monitor_catalog_tools/` workflow changes
+  (intake/confirmation tooling, MCP tool additions)
+- Contributor-onboarding docs (CONTRIBUTING, INTAKE_PIPELINE,
+  MODEM_INTAKE_WORKFLOW, AUTHORING guides)
+- Dev tooling that contributors use (`make` targets, pre-commit
+  hooks, local CI mirror commands)
+
+**Defer the merge when:** the beta is mostly runtime-code changes,
+internal refactors, or test/spec updates with no user- or
+contributor-facing surface change. The merge can wait until the
+next beta with contributor-facing changes, or until stable cut.
+
+**HACS note:** `main` being on a beta version string is acceptable
+here. HACS users who haven't opted into the beta channel install
+the latest *stable tag*, not the default branch — so a beta version
+string on `main` doesn't break stable installs. Beta-channel users
+opt in separately. Don't argue against the merge on HACS grounds.
+
+**Original driver:** the v3.14 architecture moved to `main` early
+because contributors were starting on the wrong branch — a major
+operational headache. With v3.14 on `main`, that acute pressure is
+reduced; later beta merges become more situational.
+
+### Small single-feature/fix PRs: squash merge is fine
+
+Creates one clean commit on main.
 
 ## Hotfix Releases
 

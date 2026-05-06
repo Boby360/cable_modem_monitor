@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from ..types import CoreGap
+from typing import Any
 
 _CREDENTIAL_NAME_KEYWORDS: frozenset[str] = frozenset({"password", "passwd", "pwd", "secret", "token"})
 
@@ -55,44 +52,6 @@ class ActionsDetail:
             "restart": self.restart.to_dict() if self.restart else None,
         }
 
-    @classmethod
-    def detect(
-        cls,
-        entries: list[dict[str, Any]],
-        transport: str,
-        warnings: list[str] | None = None,
-        core_gaps: list[CoreGap] | None = None,
-    ) -> ActionsDetail:
-        """Detect logout and restart actions from HAR entries.
-
-        Dispatches to transport-specific detection, then classifies
-        credential params across all detected actions.
-
-        Args:
-            entries: HAR ``log.entries`` list.
-            transport: Detected transport (``http`` or ``hnap``).
-            warnings: Mutable list to append suggestions to.
-            core_gaps: Mutable list to append core gap items to.
-
-        Returns:
-            ActionsDetail with detected actions and credential annotations.
-        """
-        # Late imports: sibling dispatchers import from this module, so
-        # top-level imports would create a cycle.
-        from .hnap import detect_hnap_actions
-        from .http import detect_http_actions
-
-        if warnings is None:
-            warnings = []
-        if core_gaps is None:
-            core_gaps = []
-        if transport == "hnap":
-            result = detect_hnap_actions(entries)
-        else:
-            result = detect_http_actions(entries, warnings, core_gaps)
-        result._classify_credentials()
-        return result
-
     def _classify_credentials(self) -> None:
         """Identify and neutralize credential params in detected actions.
 
@@ -113,6 +72,7 @@ def _detect_credential_params(params: dict[str, str]) -> set[str]:
     """Detect which param names are likely credentials.
 
     Uses two heuristics (either triggers classification):
+
     - Field name contains a credential keyword.
     - Value matches HAR sanitizer pattern (``FIELD_hex``, ``PASS_hex``).
     """

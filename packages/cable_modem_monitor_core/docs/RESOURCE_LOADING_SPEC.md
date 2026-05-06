@@ -224,6 +224,22 @@ reuses that response instead of re-fetching. This avoids an extra HTTP
 round-trip and is common with form auth modems that redirect to a
 dashboard page after login.
 
+**Contract — load-bearing.** Reuse keys on `AuthResult.response` and
+`AuthResult.response_url`. Auth managers MUST populate these fields
+only when the response body is itself a parser-consumable data page
+for the path in `response_url`. Strategies that return opaque
+artefacts (session tokens in the body, empty bodies, redirect
+landings on non-data pages) MUST leave both fields unset; otherwise
+the loader decodes the artefact as the data page and silently skips
+the real fetch. See `auth/base.py` `AuthResult` docstring and
+`MODEM_YAML_SPEC.md` § `url_token`. Regression: SB8200 #81.
+
+The contract is unit-tested at the auth-strategy boundary (each
+strategy's `test_*_branch_does_not_advertise_reuse`) and at the
+loader boundary (`test_no_reuse_when_auth_result_has_no_response`).
+Adding a new auth strategy with a non-data-page success path
+requires both tests.
+
 ---
 
 ## Timeout
@@ -314,6 +330,15 @@ policy (see Signal and Policy Separation in `ARCHITECTURE.md`).
 | Empty response body | Empty parsed result | Parser handles gracefully |
 | SSL handshake failure | `SSLError` | Check `legacy_ssl` flag |
 
+On any 4xx/5xx response, the loader's exception message includes the
+outgoing request shape (method, full URL with query string, and
+headers actually sent). Header values whose names are declared by
+the active auth strategy via `BaseAuthManager.headers()` are replaced
+with `<set, len=N>` so logs confirm session-token presence without
+leaking the value. Shared formatter:
+`loaders.diagnostics.describe_request`. See ARCHITECTURE_DECISIONS.md
+"Resource-load failure detail via request-shape log."
+
 ---
 
 ## HNAP Header Parsing Warning Suppression
@@ -339,9 +364,12 @@ Applied once at module import time.
 
 Some modems silently serve a login page at a data URL when the session
 expires — HTTP 200, but the body is a login form instead of data.
-Without detection, this reaches the parser and causes PARSE_ERROR,
-which misclassifies the root cause (auth, not parser) and prevents
-self-healing (no session clear, no auth streak increment).
+Without detection, this reaches the parser and produces empty
+extraction results that surface as a silent `no_signal` — wrong
+root-cause classification (looks like a modem with zero channels,
+actually an auth integrity failure) with no self-healing trigger.
+The fall-through case is fully covered by UC-19a (see
+[ORCHESTRATION_USE_CASES.md](ORCHESTRATION_USE_CASES.md)).
 
 ### Runtime behavior
 
@@ -369,7 +397,7 @@ Structured formats (JSON, XML) and HNAP transport are not checked.
 | Failure | Impact | Likelihood | Mitigation |
 |---------|--------|------------|------------|
 | False positive (data page has `<input type="password">`) | Auth failure loop — session cleared every poll | Very low — parser.yaml only references status/data pages, not settings/admin pages | Detected during HAR regression; override via `session.login_page` (future, if needed) |
-| False negative (login page without `<input type="password">`) | Falls through to PARSE_ERROR — wrong classification but not destructive | Low — JS-only SPA login forms | Detected during MCP onboarding (see below) |
+| False negative (response without `<input type="password">` is not real data) | Falls through to the parser and produces silent empty results — incorrectly surfaces as `no_signal`. Covers both JS-rendered SPA login forms and stub responses (issue #151). | Low — but observed in the field (CM1200, 2026-05-02) | Runtime: Parser Coordinator detects `0 of N expected anchors fulfilled` and raises `LOAD_INTEGRITY` (see UC-19a, `PARSING_SPEC § Parser Diagnostics`). Intake: HAR-time MCP onboarding flag (see below) |
 
 If a false positive occurs in the field, the escape hatch is a
 per-modem `session.login_page` override in modem.yaml with an

@@ -259,7 +259,7 @@ def mock_orchestrator_diagnostics() -> OrchestratorDiagnostics:
         auth_failure_streak=0,
         circuit_breaker_open=False,
         session_is_valid=True,
-        last_poll_timestamp=1700000000.0,
+        last_poll_at="2026-05-01T12:00:00+00:00",
     )
 
 

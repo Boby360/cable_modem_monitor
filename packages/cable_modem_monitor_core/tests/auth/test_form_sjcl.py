@@ -536,6 +536,7 @@ class TestFormSjclAuthManager:
 
         assert result.success is False
         assert "403" in result.error
+        assert result.response is session_resp
 
     def test_session_validation_connection_error(self, session: requests.Session) -> None:
         """ConnectionError on session validation propagates for collector."""

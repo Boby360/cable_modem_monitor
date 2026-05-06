@@ -6,15 +6,20 @@ Per PARSING_SPEC.md HNAPParser section.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .common import ChannelMapping, ChannelTypeConfig, FilterValue
+from .format_registry import DecodeKind
 
 
 class HNAPSection(BaseModel):
     """HNAPParser section config."""
+
+    format_tag: ClassVar[str] = "hnap"
+    decode_kind: ClassVar[DecodeKind] = "hnap"
+    transports: ClassVar[frozenset[str]] = frozenset({"hnap"})
 
     model_config = ConfigDict(extra="forbid")
     format: Literal["hnap"]

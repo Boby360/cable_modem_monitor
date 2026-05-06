@@ -347,36 +347,51 @@ Session may be stale, or strategy doesn't grant data access.
 | 2 | Collector: auth succeeds (or session reused) | | |
 | 3 | Resource Loader: GET /status.html → HTTP 401 | | |
 | 4 | Collector returns `ModemResult(signal=LOAD_AUTH)` | | |
-| 5 | Orchestrator: streak++ | | |
-| 6 | Orchestrator: collector.clear_session() | session cleared | |
-| 7 | Return `ModemSnapshot(AUTH_FAILED)` | | |
+| 5 | Orchestrator: collector.clear_session() | session cleared | |
+| 6 | Orchestrator: retry collection once in same poll | | |
+| 7 | Retry still fails | | |
+| 8 | Orchestrator: streak++ | | |
+| 9 | Return `ModemSnapshot(AUTH_FAILED)` | | |
 
 **Assertions:**
 
-- Session is cleared so next poll starts with fresh login
+- Session is cleared before the same-poll retry
+- Orchestrator retries LOAD_AUTH once in the same poll
 - Auth failure streak is incremented (LOAD_AUTH is auth-related)
-- If persistent, will escalate to circuit breaker (same as wrong credentials)
+- If the retry also fails, the failure remains auth-related and can
+  still escalate to the circuit breaker
 - INFO log: "LOAD_AUTH — clearing session, reporting auth_failed..."
 
 ---
 
 ### UC-18: LOAD_AUTH — self-correcting stale session
 
-**Preconditions:** UC-17 occurred (session cleared). Credentials are correct.
+**Preconditions:** Data page returned LOAD_AUTH because the reused
+session was stale. Credentials are correct.
 
 | Step | Action | State change | Observable |
 |------|--------|-------------|------------|
 | 1 | Consumer calls `get_modem_data()` | | |
-| 2 | Collector: no session → fresh login → success | | |
-| 3 | Collector: load → parse → OK | | |
-| 4 | Orchestrator: streak→0 | streak reset | |
-| 5 | Return `ModemSnapshot(ONLINE)` | | |
+| 2 | Collector returns `ModemResult(signal=LOAD_AUTH)` | | |
+| 3 | Orchestrator: clear session | session cleared | |
+| 4 | Orchestrator: retry collection once in same poll | | |
+| 5 | Collector: no session → fresh login → success | | |
+| 6 | Collector: load → parse → OK | | |
+| 7 | Orchestrator: streak→0 | streak reset | |
+| 8 | Return `ModemSnapshot(ONLINE)` | | |
 
 **Assertions:**
 
-- Fresh login resolves the stale session
+- Fresh login resolves the stale session within the same poll
+- `auth_failed` is not surfaced when the retry succeeds
 - Streak resets to 0
-- Single LOAD_AUTH → fresh login → success is the expected self-healing path
+- Single LOAD_AUTH → same-poll fresh login → success is the expected
+  self-healing path
+- The orchestrator increments a consecutive stale-session recovery
+  streak on each successful same-poll recovery
+- An intervening normal successful poll resets that streak
+- After 2 consecutive recovered stale sessions, later polls stop
+  attempting cached-session reuse and start with a fresh login
 
 ---
 
@@ -384,8 +399,9 @@ Session may be stale, or strategy doesn't grant data access.
 
 **Preconditions:** Resource Loader fetches a data page. Modem returns
 HTTP 200 but the body is a login page (auth redirect, session expired
-silently). Without detection, this would reach the parser and cause
-PARSE_ERROR.
+silently). Without detection, this would reach the parser and produce
+empty-data results — see UC-19a for the false-negative case where
+detection misses.
 
 | Step | Action | State change | Observable |
 |------|--------|-------------|------------|
@@ -402,6 +418,56 @@ PARSE_ERROR.
 - Login page detection checks for `<input type="password">` or similar
 - Session is cleared for fresh login on next poll
 - WARNING log: "Data page /status.html appears to be a login page"
+
+---
+
+### UC-19a: Stub-page detection — login-page false negative
+
+**Preconditions:** Resource Loader fetches a data page. Modem returns
+HTTP 200 with valid HTML chrome but the body lacks every parser anchor
+declared in `parser.yaml` — neither a `<input type="password">` (so
+login-page detection returns false) nor any of the JavaScript function
+bodies or JSON variables the parser is configured to extract from.
+
+| Step | Action | State change | Observable |
+|------|--------|-------------|------------|
+| 1 | Consumer calls `get_modem_data()` | | |
+| 2 | Collector: auth succeeds (or session reused) | | |
+| 3 | Resource Loader: GET /status.html → HTTP 200, no password field | | |
+| 4 | Resource Loader: page added to resources (login-page false negative) | | |
+| 5 | Coordinator: parsers run, find 0 of N expected anchors per resource | | |
+| 6 | Coordinator: emit `ParseDiagnostics(expected_anchors=N, fulfilled_anchors=0)` | | |
+| 7 | Collector returns `ModemResult(signal=LOAD_INTEGRITY)` | | |
+| 8 | Orchestrator: clear session | session cleared | |
+| 9 | Orchestrator: retry collection once in same poll | | |
+| 10 | If retry still produces stub | streak++ | |
+| 11 | Return `ModemSnapshot(AUTH_FAILED)` | | |
+
+**Assertions:**
+
+- Signal is `LOAD_INTEGRITY`, not `OK` — zero-anchor fulfillment is not a valid result
+- Connection status surfaces as `AUTH_FAILED` (priority 3 per `ENTITY_MODEL_SPEC § Status Sensor`)
+- Same-poll retry follows the LOAD_AUTH precedent (UC-17/UC-18); if the stub clears, recovery is symmetric to UC-18
+- Auth failure streak is incremented when retry also fails (LOAD_INTEGRITY is auth-related)
+- Repeated failures escalate to circuit breaker via the standard streak threshold
+- WARNING log: `"Stub response on /status.html [MODEL] — 0 of N expected parser anchors found, treating as session integrity failure"`
+- `ParseDiagnostics` is captured per resource in the diagnostic dump (`RUNTIME_POLLING_SPEC § Diagnostics for Remote Troubleshooting`)
+
+**Discriminator from UC-04:** UC-04 assumes the parser fulfilled its
+anchors and extracted values from a modem that simply reports zero
+locked channels. UC-19a is the inverse — the parser couldn't locate
+any of its declared sources at all. UC-04: `fulfilled == expected`
+with empty channels. UC-19a: `fulfilled == 0` with `expected > 0`.
+
+**Background:** Issue #151. Surfaced on Netgear CM1200 returning a
+7 KB stub on both `/DocsisStatus.htm` and `/RouterStatus.htm` for
+~8 minutes after a fresh integration re-add — all four expected
+`Init…TableTagValue` JS function bodies absent. Integration sat
+silent at `no_signal` until the modem eventually self-corrected with
+a 401. UC-19a closes the gap so detection happens on the next poll
+instead of waiting for the modem's internal session timeout.
+Architectural foundation: `ARCHITECTURE_DECISIONS.md § Signal/policy
+separation`.
 
 ---
 
@@ -451,15 +517,19 @@ has expired the session (firmware timeout or max-session limit).
 | 2 | Collector: session valid (uid cookie + key) → reuse | | |
 | 3 | Resource Loader: POST /HNAP1/ with stale session → HTTP 404 | | |
 | 4 | Collector: HNAP error + reused session → LOAD_AUTH | | |
-| 5 | Orchestrator: streak++, collector.clear_session() | session cleared | |
-| 6 | Return `ModemSnapshot(AUTH_FAILED)` | | |
+| 5 | Orchestrator: collector.clear_session() | session cleared | |
+| 6 | Orchestrator: retry collection once in same poll | | |
+| 7 | Collector: fresh login → HNAP load → parse → OK | | ONLINE |
 
 **Assertions:**
 
 - Signal is LOAD_AUTH (not LOAD_ERROR) — session context determines routing
-- Session is cleared so next poll starts with fresh login (→ UC-18)
-- Auth failure streak is incremented
+- Session is cleared before the same-poll retry (→ UC-18)
+- Successful retry does not increment auth failure streak
 - WARNING log: "HNAP HTTP 404 on reused session [MODEL] — session likely expired"
+- INFO logs show the retry and successful same-poll recovery
+- After the second consecutive recovered stale session, later polls
+  clear the cached session before collection and go straight to fresh auth
 
 **Note:** Some HNAP firmware returns 404 for expired sessions, not 401.
 Others may return 500. The routing does not depend on the specific status
@@ -617,7 +687,7 @@ Modem has come back online.
 **Assertions:**
 
 - Transition is logged: "Status transition [MODEL]: unreachable → online"
-- If stale session rejected (3a): next poll does fresh login, self-corrects (UC-18)
+- If stale session rejected (3a): same poll does fresh login, self-corrects (UC-18)
 - No proactive session clear — LOAD_AUTH handles it naturally
 
 ---
@@ -822,24 +892,50 @@ No LOAD_AUTH step needed. Both paths are valid.
 
 ## Health
 
-### UC-50: Normal health check — both probes
+### UC-50: Normal health check — all probes on a HEAD-capable modem
 
-**Preconditions:** Both ICMP and HTTP HEAD enabled.
+**Preconditions:** ICMP enabled, HTTP probe enabled, supports_head=True.
 
 | Step | Action | State change | Observable |
 |------|--------|-------------|------------|
 | 1 | Consumer calls `ping()` | | |
 | 2 | HM: ICMP ping → success (4ms) | | |
-| 3 | HM: HTTP HEAD → success (12ms) | | |
-| 4 | HM: derive status → RESPONSIVE | | |
-| 5 | HM: store as .latest | | |
-| 6 | Return `HealthInfo(RESPONSIVE, icmp_latency_ms=4, http_latency_ms=12)` | | |
+| 3 | HM: HTTP HEAD → success (12ms elapsed) | | |
+| 4 | HM: TCP connect → success (2ms) | | |
+| 5 | HM: server response time = 12 − 2 = 10ms | | |
+| 6 | HM: derive status from ICMP + TCP → RESPONSIVE | | |
+| 7 | HM: store as .latest | | |
+| 8 | Return `HealthInfo(RESPONSIVE, icmp_latency_ms=4, tcp_latency_ms=2, http_latency_ms=10)` | | |
 
 **Assertions:**
 
-- Both probes run regardless of each other's result
-- Order: ICMP first (lightest), then HTTP HEAD
-- INFO log: "Health check: responsive (icmp 4ms, HTTP 12ms)"
+- ICMP, HEAD, and TCP all run when conditions are met
+- Order: ICMP first, then HEAD (uncontested connection), then TCP
+- Status derives from ICMP + TCP only — HEAD is latency-only
+- DEBUG log: "Health check: responsive (ICMP 4ms, TCP 2ms, HTTP HEAD 10ms, 0 bytes)"
+
+---
+
+### UC-50a: Normal health check — GET-only modem
+
+**Preconditions:** ICMP enabled, HTTP probe enabled, supports_head=False.
+
+| Step | Action | State change | Observable |
+|------|--------|-------------|------------|
+| 1 | Consumer calls `ping()` | | |
+| 2 | HM: ICMP ping → success (4ms) | | |
+| 3 | HM: HEAD probe **skipped** (supports_head=False, no GET fallback) | | |
+| 4 | HM: TCP connect → success (2ms) | | |
+| 5 | HM: derive status from ICMP + TCP → RESPONSIVE | | |
+| 6 | Return `HealthInfo(RESPONSIVE, icmp_latency_ms=4, tcp_latency_ms=2, http_latency_ms=None)` | | |
+
+**Assertions:**
+
+- HEAD probe is never called on supports_head=False modems
+- TCP probe still runs (independent of HEAD)
+- `http_latency_ms` stays None — populating it via GET fallback would
+  produce bimodal cold/warm corrupted data
+- Status remains RESPONSIVE based on ICMP + TCP
 
 ---
 
@@ -851,14 +947,16 @@ No LOAD_AUTH step needed. Both paths are valid.
 |------|--------|-------------|------------|
 | 1 | Data poll completes successfully | | ONLINE |
 | 2 | Health timer fires (independent cadence) | | |
-| 3 | HM: run ICMP + HTTP HEAD probes | | |
-| 4 | Return `HealthInfo(RESPONSIVE, icmp_latency_ms=4, http_latency_ms=12)` | | |
+| 3 | HM: run ICMP + TCP (+ HEAD if supported) probes | | |
+| 4 | Return `HealthInfo(RESPONSIVE, ...)` | | |
 
 **Assertions:**
 
 - Health checks and data collection run independently on their own cadences
-- Health probes always run their full set (ICMP + HTTP HEAD) regardless of collection state
-- No coupling between the two pipelines — neither suppresses the other
+- Health probes always run their full set (subject to capability flags)
+  regardless of collection state, except when collection evidence
+  suppresses TCP/HEAD (UC-58, UC-59)
+- No coupling between the two pipelines — neither blocks the other
 - Health provides fast outage detection; collection provides modem data
 
 ---
@@ -872,7 +970,7 @@ Health checks still running on their own cadence.
 |------|--------|-------------|------------|
 | 1 | No data collection runs (disabled or failed) | | |
 | 2 | Health timer fires | | |
-| 3 | HM: run ICMP + HTTP HEAD probes | | |
+| 3 | HM: run ICMP + TCP (+ HEAD if supported) probes | | |
 | 4 | Return `HealthInfo(...)` | | |
 
 **Assertions:**
@@ -917,33 +1015,36 @@ yet known to be blocked).
 |------|--------|-------------|------------|
 | 1 | Consumer calls `ping()` | | |
 | 2 | HM: ICMP → fail (blocked) | | |
-| 3 | HM: HTTP HEAD → success | | |
+| 3 | HM: TCP connect → success | | |
 | 4 | Return `HealthInfo(ICMP_BLOCKED)` | | |
 
 **Assertions:**
 
 - `health_status == ICMP_BLOCKED`
-- Modem IS responsive (HTTP works) — ICMP failure is network, not modem
+- Modem IS reachable at L4 — ICMP failure is network, not modem
 - Consumer may choose to disable ICMP after seeing persistent ICMP_BLOCKED
 
 ---
 
-### UC-55: Degraded — HTTP fails, ping succeeds
+### UC-55: Degraded — TCP fails, ping succeeds
 
-**Preconditions:** Modem's web server is hung but network stack responds.
+**Preconditions:** Modem's L4 stack is hung but network stack
+responds at L3.
 
 | Step | Action | State change | Observable |
 |------|--------|-------------|------------|
 | 1 | Consumer calls `ping()` | | |
 | 2 | HM: ICMP → success | | |
-| 3 | HM: HTTP HEAD → timeout | | |
+| 3 | HM: TCP connect → timeout / refused | | |
 | 4 | Return `HealthInfo(DEGRADED)` | | |
 
 **Assertions:**
 
 - `health_status == DEGRADED`
-- Modem is network-reachable but web UI is unresponsive
-- WARNING log: "Health check: degraded (ping OK, HTTP timeout)"
+- Modem is network-reachable but TCP listen path is unhappy
+- WARNING log: "Health check: degraded (ICMP OK, TCP timeout)"
+- HEAD failure alone (when TCP succeeds) does **not** produce DEGRADED
+  — application-layer issues surface via the next slow-poll instead
 
 ---
 
@@ -994,7 +1095,7 @@ yet known to be blocked).
 
 ---
 
-### UC-58: HTTP probe skipped during active collection
+### UC-58: TCP/HEAD probes skipped during active collection
 
 **Preconditions:** Health checks and data polling both running.
 Poll and health check fire at overlapping times (e.g., after HA
@@ -1005,24 +1106,25 @@ reload both coordinators start from the same instant).
 | 1 | Orchestrator calls `record_collection_start()` | `_collection_active = True` | |
 | 2 | `collector.execute()` begins (auth, fetch, parse) | | Modem web server busy |
 | 3 | Health timer fires → `ping()` | | |
-| 4 | `_should_skip_http_probe()` → True (active) | HTTP probe not called | |
+| 4 | `_should_skip_probes()` → True (active) | TCP and HEAD not called | |
 | 5 | ICMP runs normally | | ICMP latency measured |
-| 6 | Status derived: ICMP pass + evidence → RESPONSIVE | | `http_latency_ms = None` |
-| 7 | Log: `"responsive (ICMP 1.5ms, HTTP skipped (collection active))"` | | |
+| 6 | Status derived: ICMP pass + evidence → RESPONSIVE | | `tcp_latency_ms = None`, `http_latency_ms = None` |
+| 7 | Log: `"responsive (ICMP 1.5ms, TCP/HEAD skipped (collection active))"` | | |
 | 8 | Collection completes → `record_collection_end(True)` | `_collection_active = False`, `_last_collection_success` set | |
 
 **Assertions:**
 
-- HTTP session.head/get is never called during active collection
+- Neither `socket.create_connection` nor `session.head` is called
+  during active collection
 - ICMP probe runs regardless of collection state
-- `http_latency_ms` is None (not measured, not fabricated)
-- `health_status` is RESPONSIVE (collection evidence = http_ok)
+- `tcp_latency_ms` and `http_latency_ms` are None (not measured)
+- `health_status` is RESPONSIVE (collection evidence = tcp_ok)
 - If ICMP fails during active collection, status is ICMP_BLOCKED
 - No contention on the modem's web server
 
 ---
 
-### UC-59: HTTP probe skipped after recent successful collection
+### UC-59: TCP/HEAD probes skipped after recent successful collection
 
 **Preconditions:** Data poll completed successfully. Next health
 check fires before another poll starts.
@@ -1032,18 +1134,19 @@ check fires before another poll starts.
 | 1 | Previous `ping()` completed | `_last_ping_time` set | |
 | 2 | `record_collection_end(True)` | `_last_collection_success` > `_last_ping_time` | |
 | 3 | Health timer fires → `ping()` | | |
-| 4 | `_should_skip_http_probe()` → True (recent success) | HTTP probe not called | |
-| 5 | Status derived with evidence → RESPONSIVE | | `http_latency_ms = None` |
+| 4 | `_should_skip_probes()` → True (recent success) | TCP and HEAD not called | |
+| 5 | Status derived with evidence → RESPONSIVE | | `tcp_latency_ms = None`, `http_latency_ms = None` |
 | 6 | `_last_ping_time` updated at end of `ping()` | Evidence consumed | |
-| 7 | Next `ping()` → `_last_collection_success` < `_last_ping_time` | HTTP probe runs normally | |
+| 7 | Next `ping()` → `_last_collection_success` < `_last_ping_time` | TCP and HEAD run normally | |
 
 **Assertions:**
 
 - Collection evidence is consumed once (first ping after collection)
-- Second ping after collection runs HTTP probe normally
+- Second ping after collection runs TCP and HEAD probes normally
 - Failed collection (`record_collection_end(False)`) does not
-  suppress HTTP probe
-- `http_probe=False` modems are unaffected (HTTP already disabled)
+  suppress probes
+- `http_probe=False` modems are unaffected (TCP and HEAD already
+  disabled at config level)
 
 ---
 
@@ -1524,49 +1627,56 @@ with `legacy_ssl=True`.
 
 ---
 
-### UC-85: Protocol fallback — HTTP reachable but auth requires HTTPS
+### UC-85: Protocol detection — TCP probe with HTTPS preference
 
-**Preconditions:** Modem responds on HTTP port 80 (e.g., serves an HTML
-landing page) but its authenticated endpoint (HNAP, form login) only
-works over HTTPS. Protocol detection auto-detected HTTP. User entered a
-bare IP with no protocol prefix.
+**Preconditions:** User entered a bare IP with no protocol prefix.
+The pipeline must pick HTTP or HTTPS up front and observe whether the
+modem's TLS stack is old enough to need ``LegacySSLAdapter`` at
+runtime.
 
 | Step | Action | State change | Observable |
 |------|--------|-------------|------------|
-| 1 | `detect_protocol(host)` → HTTP responds (200) | protocol=http | |
-| 2 | `ModemDataCollector(base_url=http://host)` | | |
-| 3 | `collector.execute()` → auth challenge gets HTML, not JSON | | AUTH_FAILED |
-| 4 | Validation pipeline: auto-detected HTTP + AUTH_FAILED → retry | | |
-| 5 | `ModemDataCollector(base_url=https://host, legacy_ssl=False)` | | |
-| 6 | `collector.execute()` → auth succeeds over HTTPS | protocol=https | OK |
-| 7 | Health probes run against `https://host` | | |
-| 8 | Config entry persists `protocol=https, legacy_ssl=False` | | |
+| 1 | TCP probe ``host:80`` and ``host:443`` (IPv4-pinned) | | |
+| 2 | If 443 open: ``ssl.SSLContext(SECLEVEL=0)`` + ``wrap_socket()`` | | TLS handshake |
+| 3a | Handshake succeeds → read ``sock.version()`` | protocol=https; legacy_ssl from version | |
+| 3b | Handshake fails *and* :80 open → fall back to HTTP | protocol=http | |
+| 4 | Build ``ConnectivityResult(protocol, legacy_ssl, working_url)`` | | |
 
 **Assertions:**
 
-- Retry only happens when protocol was auto-detected (not user-specified)
-- Retry only happens on AUTH_FAILED or LOAD_AUTH — not CONNECTIVITY or PARSE_ERROR
-- If HTTPS also fails auth, try HTTPS + legacy SSL before giving up
-- If all three fail, surface the last AUTH_FAILED error to the user
-- User-specified `http://` is never retried — that is an explicit override
-- Auto-detected HTTPS is never downgraded to HTTP
-- Health probes and config entry use the protocol that succeeded
-- Log at INFO level when protocol retry discovers the correct protocol
+- Detection sends *no* HTTP requests — only TCP connect plus, on
+  :443, a TLS handshake. No session slot consumed, no login counter
+  increment, no risk of single-session-firmware lockout.
+- If TCP :443 accepts and TLS handshake completes, HTTPS is chosen
+  even when :80 also responds — modems that expose both ports almost
+  always intend HTTPS for authenticated traffic.
+- ``legacy_ssl`` is observed from the negotiated TLS protocol
+  version (TLSv1.1 / TLSv1 / SSLv3 → legacy). It is *not* inferred
+  from a failed-and-retried-with-weaker-ciphers attempt.
+- The cipher context is broad (``SECLEVEL=0``) so the handshake
+  succeeds regardless of the modem's age. Runtime sessions remain
+  narrow per the persisted ``legacy_ssl`` flag — modern modems use
+  the default adapter, legacy modems mount ``LegacySSLAdapter``.
+- User-specified protocol prefixes restrict probing to that single
+  transport — auto-detect is bypassed.
+- ``working_url`` preserves a user-supplied ``host:port`` when
+  present.
 
-**Alternative path — HTTPS needs legacy SSL:**
+**Alternative path — modem unreachable:**
 
 | Step | Action | State change | Observable |
 |------|--------|-------------|------------|
-| 5a | HTTPS retry → SSLError or AUTH_FAILED | | |
-| 5b | HTTPS + legacy SSL retry → auth succeeds | | protocol=https, legacy_ssl=True |
+| 1 | TCP probe :80 and :443 → both refused or time out | | |
+| 2 | Return ``ConnectivityResult(success=False, error=...)`` | | |
 
-**Alternative path — all protocols fail:**
-
-| Step | Action | State change | Observable |
-|------|--------|-------------|------------|
-| 5a | HTTPS retry → AUTH_FAILED | | |
-| 5b | HTTPS + legacy SSL → AUTH_FAILED | | |
-| 5c | Surface error to user | | "Login failed" with original error |
+> **Auth-retry chain dissolved.** Earlier revisions of this use case
+> retried authentication across HTTP → HTTPS → HTTPS+legacy when the
+> first attempt returned ``AUTH_FAILED``. That chain produced
+> ``MSG_LOGIN_150``-style "another user logged in" errors on
+> single-session firmware (issue #120) by colliding with our own
+> previous attempt. Protocol selection is now structurally correct
+> via the TCP probe, so the retry is unnecessary; UC-86 governs auth
+> behaviour (single attempt, immediate stop on rejection).
 
 ---
 
@@ -1713,8 +1823,9 @@ password work on the next attempt. Retrying with known-bad credentials:
 
 **Distinguishing AUTH_FAILED from LOAD_AUTH:** LOAD_AUTH (401/403 on a
 data page after successful login) is a session issue, not a credential
-issue. LOAD_AUTH clears the session and the next poll re-authenticates
-fresh — this is self-correcting (UC-18). AUTH_FAILED is the modem
+issue. LOAD_AUTH clears the session and retries once in the same poll;
+if that fresh login succeeds, the condition self-corrects (UC-18).
+AUTH_FAILED is the modem
 rejecting the login itself.
 
 > **Status:** UC-20 documents the current behavior (threshold=6).

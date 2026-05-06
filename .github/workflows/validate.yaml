@@ -6,7 +6,11 @@ on:
       - main
   pull_request:
   schedule:
-    - cron: "0 0 * * *"
+    # Weekly Sunday 04:17 UTC — catches external state drift (brands repo,
+    # repo settings, HACS Action rule changes). Off-peak with a non-round
+    # minute to spread scheduler contention.
+    - cron: "17 4 * * 0"
+  workflow_dispatch:
 
 jobs:
   hacs:

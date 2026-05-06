@@ -133,7 +133,40 @@ def get_parser(name: str) -> type[ModemParser] | None:
 
 ### No Blocking I/O in Async Context
 
-See CLAUDE.md "Async/Blocking I/O" section. Use `hass.async_add_executor_job()`.
+When calling sync functions from async code (e.g., in `config_flow.py`,
+`__init__.py`), check whether the function does I/O — file reads,
+network calls, subprocess. If yes, wrap the call in an executor:
+
+```python
+# BAD - blocks event loop
+adapter = get_auth_adapter_for_parser(parser_name)  # reads YAML files
+
+# GOOD - runs in thread pool
+adapter = await hass.async_add_executor_job(get_auth_adapter_for_parser, parser_name)
+```
+
+Home Assistant warns at runtime ("Detected blocking call…") but
+catching this during development is better — Ruff can't detect it
+when the blocking call is nested inside another function.
+
+### Loading HAR Fixtures
+
+Always use `load_har_json()` from
+`solentlabs.cable_modem_monitor_core.har` for HAR file reads:
+
+```python
+from solentlabs.cable_modem_monitor_core.har import load_har_json
+
+har_data = load_har_json(path)
+```
+
+Never use raw `json.loads(path.read_text())` for HAR files — they're
+stored in Git LFS and the shared loader detects LFS pointers, attempts
+`git lfs pull` automatically, and produces actionable guidance instead
+of an opaque `JSONDecodeError` when LFS isn't set up. The only
+exception is standalone scripts that intentionally avoid Core as a
+dependency (e.g., `check_fixture_pii.py`), which inline the LFS-pointer
+check themselves.
 
 ### Corresponding Test File
 
@@ -257,6 +290,21 @@ raise ValueError("Invalid input")
 # GOOD
 raise ValueError(f"Invalid host '{host}': must be IP address or hostname")
 ```
+
+### Modem-Specific Log Messages: `[MODEL]` Tag
+
+Runtime log messages for a specific modem include the model name as a
+`[MODEL]` tag at the end of the subject phrase, before the separator
+(`:` or `—`):
+
+```python
+_logger.info("Parse complete [%s]: %d DS, %d US", model, ds, us)
+_logger.debug("Fetched /path [%s]: 200 (1234 bytes)", model)
+```
+
+Auth success logging belongs in the **collector**, not in individual
+auth managers — the collector has the model name and logs the
+`AuthResult` centrally.
 
 ### Log Before Raising
 

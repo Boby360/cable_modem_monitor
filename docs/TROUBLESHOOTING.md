@@ -246,15 +246,20 @@ automation:
 
 All log lines include a `[MODEL]` tag for multi-modem disambiguation.
 
-**The "pulse" — steady-state INFO output:**
+**Steady-state INFO is quiet.** A healthy modem produces verbose INFO
+output on the first poll (auth strategy, resource loading, parse
+summary) and then drops to DEBUG for routine success-path logs.
+Operator-relevant transitions stay at INFO regardless of poll count:
+status changes, adaptive-reuse state changes, counter resets (modem
+reboot), recovery events.
 
-At default log levels, a healthy modem produces one INFO line per poll:
+**Confirming the integration is alive without enabling DEBUG:**
 
-```text
-Parse complete [MB7621]: 24 DS, 4 US channels
-```
-
-This is the integration's heartbeat. Auth, resource loading, and session details log at INFO on the first poll, then drop to DEBUG to keep multi-modem logs clean.
+1. **Diagnostics download** — Settings → Devices & Services → Cable
+   Modem Monitor → Download Diagnostics. The JSON includes
+   `last_poll_at`, streak counters, reuse state, and channel counts.
+2. **Integration page activity log** — per-poll uptime entries on
+   the integration's device page.
 
 **Failures are always visible:**
 

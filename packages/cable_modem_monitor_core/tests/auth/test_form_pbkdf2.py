@@ -119,6 +119,123 @@ class TestFetchCsrfToken:
             assert token == ""
 
 
+# ---------------------------------------------------------------------------
+# Failure-scenario setup helpers — each configures session.post mocks so a
+# single parameterized test can drive the full failure surface.
+# ---------------------------------------------------------------------------
+
+
+def _mock_post(session: requests.Session, *responses: Any) -> None:
+    """Wire ``session.post`` to return responses in order (or raise exceptions).
+
+    A single argument becomes ``return_value``; multiple become ``side_effect``
+    so each successive POST yields the next item. Exception instances raise.
+    """
+    if len(responses) == 1:
+        session.post = MagicMock(return_value=responses[0])  # type: ignore[assignment]  # monkey-patch on real Session; mypy can't model attribute replacement
+    else:
+        session.post = MagicMock(side_effect=list(responses))  # type: ignore[assignment]  # multi-response variant of the same monkey-patch
+
+
+def _resp(*, json_value: Any = None, json_error: bool = False, status_code: int = 200) -> MagicMock:
+    """Build a MagicMock response with the requested JSON behavior."""
+    resp = MagicMock()
+    resp.status_code = status_code
+    if json_error:
+        resp.json.side_effect = ValueError("not json")
+    else:
+        resp.json.return_value = json_value
+    return resp
+
+
+def _setup_salt_invalid_json(session: requests.Session) -> None:
+    _mock_post(session, _resp(json_error=True))
+
+
+def _setup_no_salt_field(session: requests.Session) -> None:
+    _mock_post(session, _resp(json_value={"no_salt": True}))
+
+
+def _setup_salt_not_dict_string(session: requests.Session) -> None:
+    _mock_post(session, _resp(json_value="not a dict"))
+
+
+def _setup_salt_not_dict_list(session: requests.Session) -> None:
+    _mock_post(session, _resp(json_value=[1, 2, 3]))
+
+
+def _setup_salt_not_dict_int(session: requests.Session) -> None:
+    _mock_post(session, _resp(json_value=42))
+
+
+def _setup_login_401(session: requests.Session) -> None:
+    salt = _resp(json_value={"salt": "s", "saltwebui": "sw"})
+    login = _resp(json_error=True, status_code=401)
+    _mock_post(session, salt, login)
+
+
+def _setup_login_error_json(session: requests.Session) -> None:
+    salt = _resp(json_value={"salt": "s"})
+    login = _resp(json_value={"error": True, "message": "invalid password"})
+    _mock_post(session, salt, login)
+
+
+def _setup_login_not_dict_string(session: requests.Session) -> None:
+    salt = _resp(json_value={"salt": "s"})
+    login = _resp(json_value="ok")
+    _mock_post(session, salt, login)
+
+
+def _setup_login_not_dict_list(session: requests.Session) -> None:
+    salt = _resp(json_value={"salt": "s"})
+    login = _resp(json_value=["error"])
+    _mock_post(session, salt, login)
+
+
+def _setup_login_not_dict_int(session: requests.Session) -> None:
+    salt = _resp(json_value={"salt": "s"})
+    login = _resp(json_value=42)
+    _mock_post(session, salt, login)
+
+
+def _setup_login_request_exception(session: requests.Session) -> None:
+    salt = _resp(json_value={"salt": "s"})
+    _mock_post(session, salt, requests.RequestException("redirects"))
+
+
+# ┌──────────────────────────┬──────────────────────────────┬─────────────────────────┬───────────────────┐
+# │ description              │ setup_fn                     │ expected_error          │ expects_response  │
+# ├──────────────────────────┼──────────────────────────────┼─────────────────────────┼───────────────────┤
+# │ salt_not_json            │ salt response not JSON       │ "json"                  │ True              │
+# │ no_salt_in_response      │ salt body lacks "salt" field │ "salt"                  │ True              │
+# │ salt_not_dict_*          │ salt body is non-dict JSON   │ "expected json object"  │ True              │
+# │ login_401                │ login returns 401            │ "401"                   │ True              │
+# │ login_error_in_json      │ login JSON has error flag    │ "invalid password"      │ True              │
+# │ login_not_dict_*         │ login body is non-dict JSON  │ "expected json object"  │ True              │
+# │ login_request_error      │ login raises RequestException│ "Login POST failed"     │ False             │
+# └──────────────────────────┴──────────────────────────────┴─────────────────────────┴───────────────────┘
+# expects_response: True when a Response was in scope at failure (collector's
+# _log_auth_failure_detail can dump request/response detail). False when the
+# failure fires before any response object exists.
+#
+# fmt: off
+_FAILURE_CASES = [
+    # (description,            setup_fn,                       expected_error,         expects_response)
+    ("salt_not_json",          _setup_salt_invalid_json,       "json",                 True),
+    ("no_salt_in_response",    _setup_no_salt_field,           "salt",                 True),
+    ("salt_not_dict_string",   _setup_salt_not_dict_string,    "expected json object", True),
+    ("salt_not_dict_list",     _setup_salt_not_dict_list,      "expected json object", True),
+    ("salt_not_dict_int",      _setup_salt_not_dict_int,       "expected json object", True),
+    ("login_401",              _setup_login_401,               "401",                  True),
+    ("login_error_in_json",    _setup_login_error_json,        "invalid password",     True),
+    ("login_not_dict_string",  _setup_login_not_dict_string,   "expected json object", True),
+    ("login_not_dict_list",    _setup_login_not_dict_list,     "expected json object", True),
+    ("login_not_dict_int",     _setup_login_not_dict_int,      "expected json object", True),
+    ("login_request_error",    _setup_login_request_exception, "Login POST failed",    False),
+]
+# fmt: on
+
+
 class TestFormPbkdf2AuthManager:
     """FormPbkdf2AuthManager multi-round-trip auth.
 
@@ -212,166 +329,6 @@ class TestFormPbkdf2AuthManager:
         ):
             manager.authenticate(session, "http://127.0.0.1:1", "admin", "password")
 
-    def test_salt_response_not_json(self, session: requests.Session) -> None:
-        """Reports error when salt response is not JSON."""
-        config = self._make_config()
-        manager = FormPbkdf2AuthManager(config)
-        manager.configure_session(session, {})
-
-        with patch.object(session, "post") as mock_post:
-            resp = MagicMock()
-            resp.json.side_effect = ValueError("not json")
-            mock_post.return_value = resp
-
-            result = manager.authenticate(session, "http://192.168.100.1", "admin", "password")
-            assert result.success is False
-            assert "json" in result.error.lower()
-
-    def test_no_salt_in_response(self, session: requests.Session) -> None:
-        """Reports error when response has no salt field."""
-        config = self._make_config()
-        manager = FormPbkdf2AuthManager(config)
-        manager.configure_session(session, {})
-
-        with patch.object(session, "post") as mock_post:
-            resp = MagicMock()
-            resp.json.return_value = {"no_salt": True}
-            mock_post.return_value = resp
-
-            result = manager.authenticate(session, "http://192.168.100.1", "admin", "password")
-            assert result.success is False
-            assert "salt" in result.error.lower()
-
-    # ┌────────────────────┬─────────────────────────────────┐
-    # │ json_value         │ description                     │
-    # ├────────────────────┼─────────────────────────────────┤
-    # │ "not a dict"       │ string response                 │
-    # │ [1, 2, 3]          │ list response                   │
-    # │ 42                 │ integer response                │
-    # └────────────────────┴─────────────────────────────────┘
-    #
-    # fmt: off
-    SALT_NOT_DICT_CASES = [
-        # (json_value,    description)
-        ("not a dict",    "string response"),
-        ([1, 2, 3],       "list response"),
-        (42,              "integer response"),
-    ]
-    # fmt: on
-
-    @pytest.mark.parametrize(
-        "json_value,desc",
-        SALT_NOT_DICT_CASES,
-        ids=[c[1] for c in SALT_NOT_DICT_CASES],
-    )
-    def test_salt_response_not_dict(
-        self,
-        session: requests.Session,
-        json_value: object,
-        desc: str,
-    ) -> None:
-        """Reports error when salt response JSON is not a dict."""
-        config = self._make_config()
-        manager = FormPbkdf2AuthManager(config)
-        manager.configure_session(session, {})
-
-        with patch.object(session, "post") as mock_post:
-            resp = MagicMock()
-            resp.json.return_value = json_value
-            mock_post.return_value = resp
-
-            result = manager.authenticate(session, "http://192.168.100.1", "admin", "password")
-            assert result.success is False
-            assert "json object" in result.error.lower() or "salt" in result.error.lower()
-
-    # ┌────────────────────┬─────────────────────────────────┐
-    # │ json_value         │ description                     │
-    # ├────────────────────┼─────────────────────────────────┤
-    # │ "ok"               │ string response                 │
-    # │ ["error"]          │ list response                   │
-    # │ 42                 │ integer response                │
-    # └────────────────────┴─────────────────────────────────┘
-    #
-    # fmt: off
-    LOGIN_NOT_DICT_CASES = [
-        # (json_value,  description)
-        ("ok",          "string response"),
-        (["error"],     "list response"),
-        (42,            "integer response"),
-    ]
-    # fmt: on
-
-    @pytest.mark.parametrize(
-        "json_value,desc",
-        LOGIN_NOT_DICT_CASES,
-        ids=[c[1] for c in LOGIN_NOT_DICT_CASES],
-    )
-    def test_login_response_not_dict(
-        self,
-        session: requests.Session,
-        json_value: object,
-        desc: str,
-    ) -> None:
-        """Reports error when login response JSON is not a dict.
-
-        Non-dict login JSON now triggers a proper type check via
-        the shared ``parse_json_dict`` helper.
-        """
-        config = self._make_config(double_hash=False)
-        manager = FormPbkdf2AuthManager(config)
-        manager.configure_session(session, {})
-
-        with patch.object(session, "post") as mock_post:
-            salt_resp = MagicMock()
-            salt_resp.json.return_value = {"salt": "s"}
-            login_resp = MagicMock()
-            login_resp.status_code = 200
-            login_resp.json.return_value = json_value
-            mock_post.side_effect = [salt_resp, login_resp]
-
-            result = manager.authenticate(session, "http://192.168.100.1", "admin", "password")
-            assert result.success is False
-            assert "expected json object" in result.error.lower()
-
-    def test_login_401_failure(self, session: requests.Session) -> None:
-        """Reports error when login returns 401."""
-        config = self._make_config(double_hash=False)
-        manager = FormPbkdf2AuthManager(config)
-        manager.configure_session(session, {})
-
-        with patch.object(session, "post") as mock_post:
-            salt_resp = MagicMock()
-            salt_resp.json.return_value = {"salt": "s", "saltwebui": "sw"}
-            login_resp = MagicMock()
-            login_resp.status_code = 401
-            login_resp.json.side_effect = ValueError("not json")
-            mock_post.side_effect = [salt_resp, login_resp]
-
-            result = manager.authenticate(session, "http://192.168.100.1", "admin", "password")
-            assert result.success is False
-            assert "401" in result.error
-
-    def test_login_error_in_json(self, session: requests.Session) -> None:
-        """Reports error when login JSON has error flag."""
-        config = self._make_config(double_hash=False)
-        manager = FormPbkdf2AuthManager(config)
-        manager.configure_session(session, {})
-
-        with patch.object(session, "post") as mock_post:
-            salt_resp = MagicMock()
-            salt_resp.json.return_value = {"salt": "s"}
-            login_resp = MagicMock()
-            login_resp.status_code = 200
-            login_resp.json.return_value = {
-                "error": True,
-                "message": "invalid password",
-            }
-            mock_post.side_effect = [salt_resp, login_resp]
-
-            result = manager.authenticate(session, "http://192.168.100.1", "admin", "password")
-            assert result.success is False
-            assert "invalid password" in result.error
-
     def test_login_post_connection_error_propagates(self, session: requests.Session) -> None:
         """ConnectionError on login POST propagates for collector."""
         config = self._make_config(double_hash=False)
@@ -391,20 +348,32 @@ class TestFormPbkdf2AuthManager:
 
             manager.authenticate(session, "http://192.168.100.1", "admin", "password")
 
-    def test_login_post_non_connection_error(self, session: requests.Session) -> None:
-        """Non-connectivity RequestException on login POST returns AuthResult."""
+    @pytest.mark.parametrize(
+        "desc,setup_fn,expected_error,expects_response",
+        _FAILURE_CASES,
+        ids=[c[0] for c in _FAILURE_CASES],
+    )
+    def test_failure_scenario(
+        self,
+        session: requests.Session,
+        desc: str,
+        setup_fn: Any,
+        expected_error: str,
+        expects_response: bool,
+    ) -> None:
+        """Auth failure produces expected error and response state.
+
+        Drives the full failure surface from a single table — see
+        ``_FAILURE_CASES`` at module top. Adding a new failure mode
+        means a row + setup helper, not a new test method.
+        """
         config = self._make_config(double_hash=False)
         manager = FormPbkdf2AuthManager(config)
         manager.configure_session(session, {})
 
-        with patch.object(session, "post") as mock_post:
-            salt_resp = MagicMock()
-            salt_resp.json.return_value = {"salt": "s"}
-            mock_post.side_effect = [
-                salt_resp,
-                requests.RequestException("too many redirects"),
-            ]
+        setup_fn(session)
+        result = manager.authenticate(session, "http://192.168.100.1", "admin", "password")
 
-            result = manager.authenticate(session, "http://192.168.100.1", "admin", "password")
-            assert result.success is False
-            assert "Login POST failed" in result.error
+        assert result.success is False
+        assert expected_error.lower() in result.error.lower()
+        assert (result.response is not None) is expects_response

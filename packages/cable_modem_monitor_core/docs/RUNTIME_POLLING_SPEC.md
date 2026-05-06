@@ -122,8 +122,9 @@ The orchestrator derives status fields after each poll:
 | Condition | Value |
 |-----------|-------|
 | Channels present | `online` |
-| Zero channels + system_info present | `no_signal` |
-| Zero channels + no system_info | `no_signal` (with diagnostic warning) |
+| Zero channels, parser fulfilled all expected anchors | `no_signal` |
+| Zero channels, parser fulfilled some anchors (no `system_info`) | `no_signal` (with diagnostic warning) |
+| Zero channels, parser fulfilled **0 of N** expected anchors (stub response) | `auth_failed` via `LOAD_INTEGRITY` (see UC-19a) |
 | Auth failure / lockout | `auth_failed` |
 | Connection error / timeout | `unreachable` |
 
@@ -310,6 +311,26 @@ login attempts. The auth manager reuses the session (cookies + HNAP
 private key) as long as it's valid. This is critical — logging in every
 poll triggers the lockout.
 
+**Adaptive reuse disable** — some firmware keeps the local session
+looking valid while the server has already expired it, which produces a
+same-poll `LOAD_AUTH` recovery loop on every reused-session poll. After
+2 consecutive recovered stale-session events, the orchestrator stops
+attempting session reuse for the rest of that process lifetime and
+starts each poll with a fresh login. An intervening normal successful
+poll resets the recovery streak. This state is runtime-only —
+`reset_auth()` or process restart re-enables reuse.
+
+Session reuse strategy is intentionally not exposed as a per-modem
+yaml field. Per CLAUDE.md's "no per-modem recovery tuning" principle,
+all reuse-strategy adaptation lives in core via the runtime streak
+counter — generic across modems, self-tuning, and restart-resetting.
+The streak is signal-agnostic: it counts any same-poll `LOAD_AUTH`
+recovery, including reboot-induced stale sessions. False positives
+are benign — forced fresh login is harmless. Note that this is
+orthogonal to `session.max_concurrent`, which controls *session
+lifecycle* (logout-after-poll for single-session modems), not *reuse
+strategy*.
+
 **Login backoff** — after a `LoginLockoutError` (firmware anti-brute-force
 triggered), the orchestrator suppresses login for 3 polls. This gives the
 modem time to clear its lockout state. The counter decrements each poll
@@ -317,9 +338,10 @@ regardless of success. Session reuse is the primary defense against
 lockout, backoff is the safety net.
 
 **Auth circuit breaker** — persistent auth failures (wrong credentials,
-changed password, firmware changed auth mechanism) trigger an escalating
-response. The orchestrator tracks consecutive auth-related failures
-(AUTH_FAILED, AUTH_LOCKOUT, LOAD_AUTH). After 6 consecutive failures
+changed password, firmware changed auth mechanism, persistent stub
+responses) trigger an escalating response. The orchestrator tracks
+consecutive auth-related failures (AUTH_FAILED, AUTH_LOCKOUT, LOAD_AUTH,
+LOAD_INTEGRITY). After 6 consecutive failures
 (~2 lockout cycles on HNAP modems), the circuit breaker opens and
 polling stops entirely. The client (HA) triggers a reauth flow — the
 user must reconfigure credentials to resume. See `ORCHESTRATION_SPEC.md`
@@ -348,6 +370,8 @@ strategy returns `AuthResult.FAILURE`.
 | Login backoff counter | Orchestrator | Anti-brute-force suppression | Decremented each poll |
 | Auth failure streak | Orchestrator | Circuit breaker threshold tracking | Reset on successful collection |
 | Circuit open flag | Orchestrator | Stops polling on persistent auth failure | Cleared by client reauth |
+| Stale-session recovery streak | Orchestrator | Tracks consecutive recovered `LOAD_AUTH` same-poll retries | Reset by an intervening normal success, `reset_auth()`, or process restart |
+| Session reuse disabled flag | Orchestrator | Forces fresh auth on each poll after repeated consecutive stale-session recoveries | Reset by `reset_auth()` or process restart |
 | Connectivity streak | Orchestrator | Tracks consecutive unreachable failures | Reset on success, non-connectivity failure, reset_connectivity(), or health recovery |
 | Connectivity backoff | Orchestrator | Exponential backoff: min(2^(streak-1), 6) | Decremented each poll, cleared by reset_connectivity() or health recovery |
 | Last poll status | Orchestrator | Detect status transitions (e.g., unreachable → online) | Updated each poll |
@@ -489,7 +513,8 @@ Every signal a protocol layer can emit and the orchestrator's policy:
 | HTTP 401/403 on data page | Resource Loader | Clear session, increment auth streak | `auth_failed` |
 | HTTP 5xx on data page | Resource Loader | Abort poll | `unreachable` |
 | Channels found | Parser | Build response, reset auth streak | `online` |
-| Zero channels | Parser | Derive status from system_info | `no_signal` |
+| Zero channels, all expected anchors fulfilled | Parser | Derive status from system_info | `no_signal` |
+| Zero channels, **0 of N** expected anchors fulfilled | Parser Coordinator | Clear session, increment auth streak (`LOAD_INTEGRITY`) | `auth_failed` |
 
 ### Diagnostics for Remote Troubleshooting
 

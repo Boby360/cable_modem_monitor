@@ -83,6 +83,7 @@ class FormCbnAuthManager(BaseAuthManager):
             return AuthResult(
                 success=False,
                 error=f"Login page returned HTTP {response.status_code}",
+                response=response,
             )
 
         # Step 2: Read sessionToken from cookies
@@ -91,6 +92,7 @@ class FormCbnAuthManager(BaseAuthManager):
             return AuthResult(
                 success=False,
                 error=f"Login page did not set '{config.session_cookie_name}' cookie",
+                response=response,
             )
 
         # Step 3: Encrypt password
@@ -129,6 +131,7 @@ class FormCbnAuthManager(BaseAuthManager):
             return AuthResult(
                 success=False,
                 error=f"Login POST returned HTTP {login_response.status_code}",
+                response=login_response,
             )
 
         body = login_response.text
@@ -136,6 +139,7 @@ class FormCbnAuthManager(BaseAuthManager):
             return AuthResult(
                 success=False,
                 error=f"Login failed: {body[:200]}",
+                response=login_response,
             )
 
         sid_match = _SID_RE.search(body)
@@ -143,6 +147,7 @@ class FormCbnAuthManager(BaseAuthManager):
             return AuthResult(
                 success=False,
                 error="Login successful but SID not found in response",
+                response=login_response,
             )
 
         # Step 6: Set SID cookie on session

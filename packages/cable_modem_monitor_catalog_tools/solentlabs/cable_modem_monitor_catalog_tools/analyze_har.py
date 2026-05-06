@@ -20,8 +20,8 @@ from typing import Any
 
 from solentlabs.cable_modem_monitor_core.har import load_har_json
 
-from .analysis.actions import ActionsDetail
-from .analysis.auth import AuthDetail
+from .analysis.actions import ActionsDetail, detect_actions
+from .analysis.auth import AuthDetail, detect_auth
 from .analysis.format import detect_sections
 from .analysis.js_endpoints import detect_uncaptured_endpoints
 from .analysis.request_requirements import detect_request_requirements
@@ -96,13 +96,13 @@ def analyze_har(
     transport_result = TransportResult.detect(entries)
 
     # Phase 2: Auth
-    auth_result = AuthDetail.detect(entries, transport_result.transport, warnings, hard_stops, core_gaps)
+    auth_result = detect_auth(entries, transport_result.transport, warnings, hard_stops, core_gaps)
 
     # Phase 3: Session
     session_result = SessionDetail.detect(entries, transport_result.transport, auth_result.strategy, warnings)
 
     # Phase 4: Actions
-    actions_result = ActionsDetail.detect(entries, transport_result.transport, warnings, core_gaps)
+    actions_result = detect_actions(entries, transport_result.transport, warnings, core_gaps)
 
     # Phase 5-6: Format detection and field mapping
     sections = detect_sections(entries, transport_result.transport, warnings, hard_stops, fleet=fleet)

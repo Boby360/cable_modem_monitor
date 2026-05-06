@@ -274,6 +274,49 @@ class TestHTTPResourceLoader:
         # /info.html should be reused from auth response
         assert "Auth Landing" in resources["/info.html"].get_text()
 
+    def test_no_reuse_when_auth_result_has_no_response(self) -> None:
+        """Loader fetches the data path when AuthResult does not advertise reuse.
+
+        Negative pair to ``test_auth_response_reuse``. When the auth
+        manager populates ``auth_context.url_token`` but does NOT set
+        ``response``/``response_url`` (token-only body, not a data
+        page — see RESOURCE_LOADING_SPEC.md § Auth Response Reuse),
+        the loader must perform a real fetch with the token appended
+        to the URL. Reusing a token-only auth response would surface
+        the token string as the parsed data page.
+
+        Regression: SB8200 #81. Pairs with
+        test_token_branch_does_not_advertise_reuse in test_url_token.py.
+        """
+        from solentlabs.cable_modem_monitor_core.auth.base import AuthContext
+
+        # Server returns the real data page for the token-suffixed URL
+        entries = _build_entries({"/cmconnectionstatus.html": ("text/html", "<html>Downstream Bonded Channels</html>")})
+
+        auth_result = AuthResult(
+            success=True,
+            auth_context=AuthContext(url_token="ct_token_value"),
+            # response and response_url intentionally unset — token branch
+        )
+
+        with HARMockServer(entries) as server:
+            session = requests.Session()
+            loader = HTTPResourceLoader(
+                session,
+                server.base_url,
+                timeout=10,
+                url_token="ct_token_value",
+                token_prefix="ct_",
+            )
+            targets = [ResourceTarget(path="/cmconnectionstatus.html", format="table")]
+            resources = loader.fetch(targets, auth_result=auth_result)
+
+        # Loader fetched the data page — token appended via url_token, not reused
+        assert "Downstream Bonded Channels" in resources["/cmconnectionstatus.html"].get_text()
+        # Verify the loader recorded the network fetch (not a reuse)
+        paths_fetched = [r[0] for r in loader.resource_fetches]
+        assert "/cmconnectionstatus.html" in paths_fetched
+
     def test_auth_response_reuse_with_error_status(self) -> None:
         """Auth response with error status is still eligible for reuse.
 
@@ -381,6 +424,33 @@ class TestHTTPResourceLoader:
             targets = [ResourceTarget(path="/status.html", format="table")]
             with pytest.raises(LoginPageDetectedError):
                 loader.fetch(targets)
+
+    def test_stub_html_passes_loader_unchanged(self) -> None:
+        """UC-19a: stub HTML without a password input is NOT classified as
+        a login page — it passes through to the parser. Stub-page detection
+        moved to the parser-coordinator layer (issue #151)."""
+        stub_html = (
+            "<html><head><title>Modem</title>"
+            '<link rel="stylesheet" href="css/main.css">'
+            '<script src="jquery.js"></script>'
+            "</head><body><div>Loading...</div></body></html>"
+        )
+        entries = _build_entries({"/status.html": ("text/html", stub_html)})
+
+        with HARMockServer(entries) as server:
+            session = requests.Session()
+            loader = HTTPResourceLoader(
+                session,
+                server.base_url,
+                timeout=10,
+                detect_login_pages=True,
+            )
+            targets = [ResourceTarget(path="/status.html", format="table")]
+            resources = loader.fetch(targets)
+
+        # Loader's job is HTTP-shape; it does not know parser anchors.
+        # Stub passes through; the coordinator detects zero-fulfillment.
+        assert "/status.html" in resources
 
     def test_401_raises_resource_load_error(self) -> None:
         """401 response raises ResourceLoadError with status code."""

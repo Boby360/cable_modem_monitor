@@ -41,6 +41,7 @@ declaratively.
 | [parser.yaml Schema](#parseryaml-schema) | Common concepts: field types, units, scale, uptime, filters |
 | [parser.py — Post-Processing Hooks](#parserpy--post-processing-hooks) | When and how to use code-based post-processing |
 | [Output Contract](#output-contract) | ModemData schema, field guarantees, entity identity |
+| [Parser Diagnostics](#parser-diagnostics) | Per-resource expected vs. fulfilled anchor counts |
 | [Channel Type Detection](#channel-type-detection) | How QAM vs OFDM is determined |
 | [Aggregate](#aggregate-derived-system_info-fields) | Channel counts, error totals, scoped sums |
 | [Computed](#computed-derived-system_info-fields) | Derived system_info from other system_info fields |
@@ -55,7 +56,7 @@ Each extraction format has its own specification:
 | [FORMAT_TABLE_SPEC.md](FORMAT_TABLE_SPEC.md) | `table`, `table_transposed` | HTML `<table>` elements, companion table merging |
 | [FORMAT_JAVASCRIPT_SPEC.md](FORMAT_JAVASCRIPT_SPEC.md) | `javascript`, `javascript_json` | Delimited strings and JSON arrays in JS |
 | [FORMAT_HNAP_SPEC.md](FORMAT_HNAP_SPEC.md) | `hnap` | Delimiter-separated values in HNAP JSON |
-| [FORMAT_JSON_SPEC.md](FORMAT_JSON_SPEC.md) | `json` | JSON API responses via field paths |
+| [FORMAT_JSON_SPEC.md](FORMAT_JSON_SPEC.md) | `json`, `json_transposed` | JSON API responses via field paths or indexed-pivot rows |
 | [FORMAT_XML_SPEC.md](FORMAT_XML_SPEC.md) | `xml` | XML element children via tag names |
 
 ### Related Specifications
@@ -92,7 +93,7 @@ respectively).
 | Transport | Valid Formats | Why |
 |-----------|--------------|-----|
 | `hnap` | `hnap` | Protocol-defined: SOAP JSON with delimiters |
-| `http` | `table`, `table_transposed`, `html_fields`, `javascript`, `javascript_json`, `json` | Format determines decode step; any format supports optional `encoding` property (e.g., `base64` — decoded before format-specific parsing). |
+| `http` | `table`, `table_transposed`, `html_fields`, `javascript`, `javascript_json`, `json`, `json_transposed` | Format determines decode step; any format supports optional `encoding` property (e.g., `base64` — decoded before format-specific parsing). |
 | `cbn` | `xml` | XML POST API: parameterized POST with XML responses |
 
 See [MODEM_YAML_SPEC.md](MODEM_YAML_SPEC.md#validation-rules) for the full transport constraint
@@ -113,6 +114,7 @@ table including auth strategies.
 | **JSON** | | | |
 | `hnap` | `HNAPParser` | Delimiter-separated values in HNAP JSON responses | any section |
 | `json` | `JSONParser` | JSON response structures via field paths | any section |
+| `json_transposed` | `JSONTransposedParser` | JSON responses with `name`+`indexN` rows (rows=metrics, cols=channels) | downstream/upstream |
 | **XML** | | | |
 | `xml` | `XMLParser` | XML element children via tag name navigation | any section |
 
@@ -422,10 +424,17 @@ class PostProcessor:
     def parse_downstream(
         self, channels: list[dict], resources: dict[str, Any]
     ) -> list[dict]:
-        """Convert OFDM frequency ranges to center frequencies."""
+        """Compute OFDM `frequency` from a non-standard firmware shape.
+
+        OFDM ``frequency`` is the lower edge of the active subcarrier
+        band — see FIELD_REGISTRY.md § frequency semantics. Most
+        firmwares fit `range: span` (band string) or a discrete
+        lower-edge key; reach for a PostProcessor only when the
+        firmware shape is novel.
+        """
         for ch in channels:
             if ch.get("channel_type") == "ofdm" and ch.get("freq_start"):
-                ch["frequency"] = (ch["freq_start"] + ch["freq_end"]) // 2
+                ch["frequency"] = ch["freq_start"]
         return channels
 
     def parse_system_info(
@@ -622,7 +631,7 @@ reported by roughly half the fleet.
 
 | Field | Type | Notes |
 | ----- | ---- | ----- |
-| `frequency` | int | Center frequency in Hz (when available) |
+| `frequency` | int | Hz; lower edge of active subcarrier band (when available). See [FIELD_REGISTRY.md § `frequency` semantics](FIELD_REGISTRY.md#frequency-semantics). |
 | `power` | float | dBmV (PLC power) |
 | `snr` | float | Average RxMER in dB |
 | `corrected` | int | LDPC codeword corrections (when available) |
@@ -633,7 +642,7 @@ reported by roughly half the fleet.
 
 | Field | Type | Notes |
 | ----- | ---- | ----- |
-| `frequency` | int | Center frequency in Hz (when available) |
+| `frequency` | int | Hz; lower edge of active subcarrier band (when available). See [FIELD_REGISTRY.md § `frequency` semantics](FIELD_REGISTRY.md#frequency-semantics). |
 | `power` | float | dBmV |
 | `modulation` | str | Optional. Same rules as OFDM downstream. |
 
@@ -749,6 +758,59 @@ The presence of data in the output IS the capability declaration:
 
 No separate capabilities list in modem.yaml. No registration. If the
 parser extracts it, the entity exists.
+
+---
+
+## Parser Diagnostics
+
+Alongside `ModemData`, the parser coordinator surfaces per-resource
+diagnostics describing how completely the parse covered the
+extraction targets declared in `parser.yaml`. These diagnostics are
+the orchestrator's signal that a "successful" empty parse is
+actually a stub-page false negative (see UC-19a).
+
+### Contract
+
+For each `resource` referenced by `parser.yaml`, the coordinator
+reports two counts:
+
+| Field | Meaning |
+|-------|---------|
+| `expected_anchors` | Number of named extraction targets declared for this resource — sum of `functions[].name` across format-specific sources (`format: javascript`), `variable` declarations (`format: javascript_json`), `<table>` matchers (`format: table`), HNAP `data_key` references, etc. |
+| `fulfilled_anchors` | Number of those targets the parser actually located in the response body |
+
+Reported as a flat collection of `(resource_path, expected, fulfilled)`
+records on the coordinator's parse output, available to the collector
+without parsing internals.
+
+### Semantics
+
+- `fulfilled_anchors == expected_anchors` — extraction was complete; any zero-channel result is a real `no_signal` (UC-04 / UC-05).
+- `0 < fulfilled_anchors < expected_anchors` — extraction was partial; current behavior preserved (warn and continue). Common on firmware variants where some sources legitimately do not exist.
+- `fulfilled_anchors == 0` with `expected_anchors > 0` — stub-response detection. The collector raises this to `CollectorSignal.LOAD_INTEGRITY` (see UC-19a, ORCHESTRATION_SPEC § Signal Catalog).
+
+### Implementation note
+
+How the coordinator computes `fulfilled_anchors` is a format-specific
+concern — JS-format parsers know which named functions located their
+`tagValueList`; table parsers know which `<table>` matchers hit;
+HNAP parsers know which `data_key` references resolved. This
+specification defines **what is reported**, not the mechanism by
+which each format counts. Parsers may surface the count via tuple
+return, recorder injection, or coordinator-side inspection of the
+extracted data shape against `parser_config` — whichever fits the
+format cleanly.
+
+The `BaseParser` output shape (`ModemData`) is unchanged. Diagnostics
+are a sibling channel, not a replacement.
+
+### Diagnostic dump exposure
+
+Captured in HA's diagnostics download (per `RUNTIME_POLLING_SPEC §
+Diagnostics for Remote Troubleshooting`) as a list of
+`(resource_path, expected_anchors, fulfilled_anchors)` records.
+Lets bug-report reviewers see at a glance which resources matched
+and which slipped to stub.
 
 ---
 

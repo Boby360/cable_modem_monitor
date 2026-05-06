@@ -116,14 +116,21 @@ class HealthInfo:
             collection evidence.
         icmp_latency_ms: Round-trip time in milliseconds. None if
             ICMP failed, not supported, or not attempted.
+        tcp_latency_ms: TCP handshake time in milliseconds to the
+            modem's web port. Probes L4 reachability and the modem's
+            TCP listen/accept path. None if the TCP probe failed or
+            was not attempted.
         http_latency_ms: HTTP server response time in milliseconds,
-            excluding TCP connection setup overhead. Reflects modem
-            web-server load. None if HTTP failed, not attempted, or
-            suppressed by collection evidence.
+            excluding TCP connection setup overhead. Populated only
+            on modems where ``supports_head=True`` (HEAD bypasses the
+            handler and gives a clean unimodal signal). None on
+            GET-only modems, HTTP failure, or when suppressed by
+            collection evidence.
     """
 
     health_status: HealthStatus
     icmp_latency_ms: float | None = None
+    tcp_latency_ms: float | None = None
     http_latency_ms: float | None = None
 
 
@@ -181,10 +188,17 @@ class OrchestratorDiagnostics:
             reachable.
         connectivity_backoff_remaining: Polls to skip before next
             connection attempt. 0 when no backoff active.
+        stale_session_recovery_streak: Consecutive recovered stale-
+            session events. Increments when a LOAD_AUTH same-poll retry
+            succeeds and resets on an intervening normal success or
+            unrecovered failure.
+        session_reuse_disabled: Whether the orchestrator has stopped
+            attempting cached-session reuse for the rest of this
+            runtime after repeated consecutive stale-session recoveries.
         resource_fetches: Per-resource timing and size from the last
             successful collection.
-        last_poll_timestamp: Monotonic time of last get_modem_data()
-            call. None if never polled.
+        last_poll_at: ISO 8601 wall-clock timestamp (UTC) of the last
+            ``get_modem_data()`` call. None if never polled.
     """
 
     poll_duration: float | None
@@ -194,8 +208,10 @@ class OrchestratorDiagnostics:
     auth_strategy: str = ""
     connectivity_streak: int = 0
     connectivity_backoff_remaining: int = 0
+    stale_session_recovery_streak: int = 0
+    session_reuse_disabled: bool = False
     resource_fetches: list[ResourceFetch] = field(default_factory=list)
-    last_poll_timestamp: float | None = None
+    last_poll_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict for diagnostics output."""
@@ -207,8 +223,10 @@ class OrchestratorDiagnostics:
             "auth_strategy": self.auth_strategy,
             "connectivity_streak": self.connectivity_streak,
             "connectivity_backoff_remaining": self.connectivity_backoff_remaining,
+            "stale_session_recovery_streak": self.stale_session_recovery_streak,
+            "session_reuse_disabled": self.session_reuse_disabled,
             "resource_fetches": [f.to_dict() for f in self.resource_fetches],
-            "last_poll_timestamp": self.last_poll_timestamp,
+            "last_poll_at": self.last_poll_at,
         }
 
 

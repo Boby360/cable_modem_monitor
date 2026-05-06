@@ -33,6 +33,7 @@ from custom_components.cable_modem_monitor.services import (
     _get_dashboard_titles,
     _get_entity_prefix,
     _group_by_type,
+    _migrate_statistics,
     _plan_stat_renames_to_id,
     _plan_stat_renames_to_number,
     _resolve_config_entry_for_device,
@@ -41,6 +42,7 @@ from custom_components.cable_modem_monitor.services import (
     async_register_services,
     async_request_modem_refresh,
     async_unregister_services,
+    create_convert_channel_identity_handler,
     create_generate_dashboard_handler,
     create_request_health_check_handler,
     create_request_refresh_handler,
@@ -203,10 +205,13 @@ def test_build_status_card_yaml_full():
         "cable_modem",
         system_info,
         has_icmp=True,
+        has_head=True,
     )
     yaml = "\n".join(lines)
     assert "sensor.cable_modem_status" in yaml
     assert "sensor.cable_modem_ping_latency" in yaml
+    assert "sensor.cable_modem_tcp_latency" in yaml
+    assert "sensor.cable_modem_http_latency" in yaml
     assert "sensor.cable_modem_software_version" in yaml
     assert "sensor.cable_modem_system_uptime" in yaml
     assert "sensor.cable_modem_last_boot_time" in yaml
@@ -216,18 +221,20 @@ def test_build_status_card_yaml_full():
 
 
 def test_build_status_card_yaml_minimal():
-    """Status card omits entities when modem data is sparse."""
+    """Status card omits entities when modem data is sparse and HEAD unsupported."""
     system_info = {}
     lines = _build_status_card_yaml(
         "cable_modem",
         system_info,
         has_icmp=False,
+        has_head=False,
     )
     yaml = "\n".join(lines)
     assert "sensor.cable_modem_status" in yaml
-    assert "sensor.cable_modem_http_latency" in yaml
+    assert "sensor.cable_modem_tcp_latency" in yaml
     assert "ds_channel_count" in yaml
     assert "ping_latency" not in yaml
+    assert "http_latency" not in yaml
     assert "software_version" not in yaml
     assert "system_uptime" not in yaml
     assert "last_boot_time" not in yaml
@@ -275,20 +282,31 @@ def test_build_error_graphs_yaml():
     assert "sensor.cm_total_uncorrected_errors" in yaml
 
 
-def test_build_latency_graph_yaml_with_icmp():
-    """Latency graph includes ICMP when available."""
-    lines = _build_latency_graph_yaml("cm", has_icmp=True)
+def test_build_latency_graph_yaml_with_icmp_and_head():
+    """Latency graph includes Ping, TCP, and HTTP HEAD when all available."""
+    lines = _build_latency_graph_yaml("cm", has_icmp=True, has_head=True)
     yaml = "\n".join(lines)
     assert "sensor.cm_ping_latency" in yaml
+    assert "sensor.cm_tcp_latency" in yaml
     assert "sensor.cm_http_latency" in yaml
 
 
-def test_build_latency_graph_yaml_no_icmp():
-    """Latency graph omits ICMP when unavailable."""
-    lines = _build_latency_graph_yaml("cm", has_icmp=False)
+def test_build_latency_graph_yaml_no_icmp_no_head():
+    """Latency graph omits Ping and HTTP when unavailable; TCP always present."""
+    lines = _build_latency_graph_yaml("cm", has_icmp=False, has_head=False)
     yaml = "\n".join(lines)
     assert "ping_latency" not in yaml
-    assert "sensor.cm_http_latency" in yaml
+    assert "sensor.cm_tcp_latency" in yaml
+    assert "http_latency" not in yaml
+
+
+def test_build_latency_graph_yaml_icmp_only():
+    """Latency graph: ICMP supported but HEAD not — no HTTP line."""
+    lines = _build_latency_graph_yaml("cm", has_icmp=True, has_head=False)
+    yaml = "\n".join(lines)
+    assert "sensor.cm_ping_latency" in yaml
+    assert "sensor.cm_tcp_latency" in yaml
+    assert "http_latency" not in yaml
 
 
 # -----------------------------------------------------------------------
@@ -783,6 +801,7 @@ def test_generate_dashboard_handler(
         "entity_prefix": "none",
         "host": "192.168.100.1",
         "supports_icmp": True,
+        "supports_head": True,
     }
 
     hass = MagicMock()
@@ -814,6 +833,7 @@ def test_generate_dashboard_handler(
     assert "sensor.cable_modem_ds_ofdm_ch_2_power" in yaml
     assert "sensor.cable_modem_us_atdma_ch_1_power" in yaml
     assert "sensor.cable_modem_total_corrected_errors" in yaml
+    assert "sensor.cable_modem_tcp_latency" in yaml
     assert "sensor.cable_modem_http_latency" in yaml
     assert "entity: button.cable_modem_restart_modem" in yaml
 
@@ -970,3 +990,399 @@ class TestPlanStatRenamesToId:
         )
         expected = [tuple(pair) for pair in case["expected"]]
         assert result == expected
+
+
+# -----------------------------------------------------------------------
+# _migrate_statistics — recorder I/O helper
+# -----------------------------------------------------------------------
+
+
+def test_migrate_statistics_clears_then_renames() -> None:
+    """Each rename pair queues a clear on the new id, then an update from old to new."""
+    hass = MagicMock()
+    recorder = MagicMock()
+
+    renames = [
+        ("sensor.cable_modem_ds_qam_ch_1_power", "sensor.cable_modem_ds_ch_1_power"),
+        ("sensor.cable_modem_ds_qam_ch_2_power", "sensor.cable_modem_ds_ch_2_power"),
+    ]
+
+    with patch("homeassistant.helpers.recorder.get_instance", return_value=recorder) as mock_get:
+        result = _migrate_statistics(hass, renames)
+
+    assert result == 2
+    mock_get.assert_called_once_with(hass)
+
+    # Two clear calls (one per new_id) and two update calls (one per pair).
+    assert recorder.async_clear_statistics.call_count == 2
+    assert recorder.async_update_statistics_metadata.call_count == 2
+
+    recorder.async_clear_statistics.assert_any_call(["sensor.cable_modem_ds_ch_1_power"])
+    recorder.async_clear_statistics.assert_any_call(["sensor.cable_modem_ds_ch_2_power"])
+    recorder.async_update_statistics_metadata.assert_any_call(
+        "sensor.cable_modem_ds_qam_ch_1_power",
+        new_statistic_id="sensor.cable_modem_ds_ch_1_power",
+    )
+
+
+def test_migrate_statistics_empty_list_returns_zero() -> None:
+    """Empty rename list still resolves the recorder but issues no calls."""
+    hass = MagicMock()
+    recorder = MagicMock()
+
+    with patch("homeassistant.helpers.recorder.get_instance", return_value=recorder):
+        result = _migrate_statistics(hass, [])
+
+    assert result == 0
+    recorder.async_clear_statistics.assert_not_called()
+    recorder.async_update_statistics_metadata.assert_not_called()
+
+
+# -----------------------------------------------------------------------
+# create_convert_channel_identity_handler — full handler dispatch
+# -----------------------------------------------------------------------
+
+
+def _make_convert_runtime(mock_runtime_data, target_mode: str = "id"):
+    """Configure runtime + entry data for a convert_channel_identity test."""
+    from solentlabs.cable_modem_monitor_core.orchestration.models import ModemSnapshot
+    from solentlabs.cable_modem_monitor_core.orchestration.signals import (
+        ConnectionStatus,
+        DocsisStatus,
+    )
+
+    snapshot = ModemSnapshot(
+        connection_status=ConnectionStatus.ONLINE,
+        docsis_status=DocsisStatus.OPERATIONAL,
+        modem_data={
+            "downstream": [
+                {"channel_id": 1, "channel_number": 1, "channel_type": "qam"},
+                {"channel_id": 2, "channel_number": 2, "channel_type": "qam"},
+            ],
+            "upstream": [
+                {"channel_id": 1, "channel_number": 1, "channel_type": "atdma"},
+            ],
+            "system_info": {
+                "downstream_channel_count": 2,
+                "upstream_channel_count": 1,
+            },
+        },
+    )
+    mock_runtime_data.data_coordinator.data = snapshot
+
+    entry = _make_mock_entry(mock_runtime_data)
+    entry.data = {
+        "channel_identity": target_mode,
+        "entity_prefix": "none",
+        "host": "192.168.100.1",
+    }
+    return entry
+
+
+async def test_convert_no_entry_returns_error(mock_runtime_data) -> None:
+    """No loaded entry → handler returns error dict, recorder untouched."""
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = []
+
+    handler = create_convert_channel_identity_handler(hass)
+    call = _make_mock_call()
+
+    with patch(
+        "homeassistant.components.recorder.statistics.async_list_statistic_ids",
+        new_callable=AsyncMock,
+    ) as mock_list:
+        result = await handler(call)
+
+    assert result == {"error": "No cable modem configured"}
+    mock_list.assert_not_called()
+
+
+async def test_convert_no_modem_data_returns_error(mock_runtime_data) -> None:
+    """Snapshot is None (modem offline) → handler returns offline-error dict."""
+    mock_runtime_data.data_coordinator.data = None
+    entry = _make_mock_entry(mock_runtime_data)
+    entry.data = {"channel_identity": "id", "entity_prefix": "none"}
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [entry]
+
+    handler = create_convert_channel_identity_handler(hass)
+    call = _make_mock_call()
+
+    with patch(
+        "homeassistant.components.recorder.statistics.async_list_statistic_ids",
+        new_callable=AsyncMock,
+    ) as mock_list:
+        result = await handler(call)
+
+    assert "error" in result
+    assert "modem must be online" in result["error"]
+    mock_list.assert_not_called()
+
+
+async def test_convert_no_renames_returns_info(mock_runtime_data) -> None:
+    """No matching opposite-mode stats → 'already in X mode' info, no migration."""
+    entry = _make_convert_runtime(mock_runtime_data, target_mode="id")
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [entry]
+
+    # Recorder reports stats unrelated to this modem
+    with (
+        patch(
+            "homeassistant.components.recorder.statistics.async_list_statistic_ids",
+            new_callable=AsyncMock,
+            return_value=[
+                {"statistic_id": "sensor.thermostat_temperature"},
+                {"statistic_id": "sensor.kitchen_humidity"},
+            ],
+        ),
+        patch("homeassistant.helpers.recorder.get_instance") as mock_get,
+    ):
+        handler = create_convert_channel_identity_handler(hass)
+        result = await handler(_make_mock_call())
+
+    assert result["renamed"] == 0
+    assert "already in id mode" in result["info"]
+    mock_get.assert_not_called()
+
+
+async def test_convert_to_id_mode_migrates(mock_runtime_data) -> None:
+    """Number-mode stats present + target=id → migrates, schedules reload."""
+    entry = _make_convert_runtime(mock_runtime_data, target_mode="id")
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [entry]
+
+    recorder = MagicMock()
+    # Number-mode stats that should be renamed to id-mode
+    number_mode_stats = [
+        {"statistic_id": "sensor.cable_modem_ds_ch_1_power"},
+        {"statistic_id": "sensor.cable_modem_ds_ch_2_power"},
+    ]
+
+    with (
+        patch(
+            "homeassistant.components.recorder.statistics.async_list_statistic_ids",
+            new_callable=AsyncMock,
+            return_value=number_mode_stats,
+        ),
+        patch("homeassistant.helpers.recorder.get_instance", return_value=recorder),
+    ):
+        handler = create_convert_channel_identity_handler(hass)
+        result = await handler(_make_mock_call())
+
+    assert result["mode"] == "id"
+    assert result["renamed"] >= 1
+    # Reload was scheduled
+    hass.async_create_task.assert_called_once()
+
+
+async def test_convert_to_number_mode_migrates(mock_runtime_data) -> None:
+    """ID-mode stats present + target=number → migrates via _plan_stat_renames_to_number."""
+    entry = _make_convert_runtime(mock_runtime_data, target_mode="number")
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [entry]
+
+    recorder = MagicMock()
+    id_mode_stats = [
+        {"statistic_id": "sensor.cable_modem_ds_qam_ch_1_power"},
+        {"statistic_id": "sensor.cable_modem_ds_qam_ch_2_power"},
+    ]
+
+    with (
+        patch(
+            "homeassistant.components.recorder.statistics.async_list_statistic_ids",
+            new_callable=AsyncMock,
+            return_value=id_mode_stats,
+        ),
+        patch("homeassistant.helpers.recorder.get_instance", return_value=recorder),
+    ):
+        handler = create_convert_channel_identity_handler(hass)
+        result = await handler(_make_mock_call())
+
+    assert result["mode"] == "number"
+    assert result["renamed"] >= 1
+    hass.async_create_task.assert_called_once()
+
+
+async def test_convert_with_device_id_resolves_entry(mock_runtime_data) -> None:
+    """device_id supplied → handler uses _resolve_config_entry_for_device, not _find_loaded_entry."""
+    entry = _make_convert_runtime(mock_runtime_data, target_mode="id")
+    hass = MagicMock()
+
+    with (
+        patch(
+            "custom_components.cable_modem_monitor.services." "_resolve_config_entry_for_device",
+            return_value=entry,
+        ) as mock_resolve,
+        patch(
+            "homeassistant.components.recorder.statistics.async_list_statistic_ids",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        handler = create_convert_channel_identity_handler(hass)
+        result = await handler(_make_mock_call(device_id="dev_abc"))
+
+    mock_resolve.assert_called_once_with(hass, "dev_abc")
+    # No stats matched → "no migration needed" info path
+    assert result["renamed"] == 0
+
+
+# -----------------------------------------------------------------------
+# Internal yaml-builder branches not covered elsewhere
+# -----------------------------------------------------------------------
+
+
+def test_get_channel_info_number_mode_filters_unlocked() -> None:
+    """_get_channel_info_number_mode returns only locked channels, sorted."""
+    from custom_components.cable_modem_monitor.services import (
+        _get_channel_info_number_mode,
+    )
+
+    channels = [
+        {"channel_number": 2, "lock_status": "locked"},
+        {"channel_number": 1, "lock_status": "locked"},
+        {"channel_number": 3, "lock_status": "not_locked"},
+    ]
+    result = _get_channel_info_number_mode(channels)
+    # sorted by channel_number, only locked ones, with empty type string
+    assert result == [("", 1), ("", 2)]
+
+
+def test_get_channel_info_number_mode_dispatched_when_identity_is_number() -> None:
+    """_get_channel_info routes to _get_channel_info_number_mode when in NUMBER mode."""
+    from custom_components.cable_modem_monitor.const import ChannelIdentity
+    from custom_components.cable_modem_monitor.services import _get_channel_info
+
+    modem_data = {
+        "downstream": [{"channel_number": 1, "lock_status": "locked"}],
+        "upstream": [{"channel_number": 1, "lock_status": "locked"}],
+    }
+    ds, us = _get_channel_info(modem_data, ChannelIdentity.NUMBER)
+    # Empty type string is the position-mode signal
+    assert ds == [("", 1)]
+    assert us == [("", 1)]
+
+
+def test_format_channel_label_position_mode() -> None:
+    """Empty ch_type → 'Ch <n>' with no type prefix."""
+    from custom_components.cable_modem_monitor.services import _format_channel_label
+
+    assert _format_channel_label("", 5, "full") == "Ch 5"
+    # The format param is ignored in position mode
+    assert _format_channel_label("", 5, "type_id") == "Ch 5"
+
+
+# Optional-entity YAML builders share a "field-presence → entity-id emitted"
+# shape; table-drive each one. New cases = new row.
+#
+# ┌─────────────────────────────────────────┬─────────────────────────────────┐
+# │ system_info input                       │ expected entity-id substrings   │
+# ├─────────────────────────────────────────┼─────────────────────────────────┤
+_HARDWARE_DIAG_CASES = [
+    # (description,        system_info,                                              expected_entities)
+    ("empty", {}, []),
+    ("cpu_speed_only", {"cpu_speed": "1GHz"}, ["sensor.modem_cpu_speed"]),
+    ("memory_total_only", {"memory_total": 1024}, ["sensor.modem_memory_total"]),
+    ("memory_free_only", {"memory_free": 512}, ["sensor.modem_memory_free"]),
+    (
+        "all_three",
+        {"cpu_speed": "1GHz", "memory_total": 1024, "memory_free": 512},
+        ["sensor.modem_cpu_speed", "sensor.modem_memory_total", "sensor.modem_memory_free"],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "system_info,expected",
+    [(c[1], c[2]) for c in _HARDWARE_DIAG_CASES],
+    ids=[c[0] for c in _HARDWARE_DIAG_CASES],
+)
+def test_build_hardware_diag_entities(system_info: dict[str, Any], expected: list[str]) -> None:
+    """One entity emitted per present hardware-diagnostics field; empty input → no lines."""
+    from custom_components.cable_modem_monitor.services import (
+        _build_hardware_diag_entities,
+    )
+
+    joined = "\n".join(_build_hardware_diag_entities("modem", system_info))
+    for entity_id in expected:
+        assert entity_id in joined
+    if not expected:
+        assert joined == ""
+
+
+_PROVISIONED_FIELDS = (
+    "provisioned_speed_down",
+    "provisioned_speed_up",
+    "provisioned_burst_down",
+    "provisioned_burst_up",
+)
+
+
+def _provisioned_case(field: str, value: str) -> tuple[str, dict[str, str], list[str]]:
+    """Build a single-field case: input dict + expected entity-id substring."""
+    return (field, {field: value}, [f"sensor.modem_{field}"])
+
+
+_PROVISIONED_SPEED_CASES = [
+    ("empty", {}, []),
+    _provisioned_case("provisioned_speed_down", "1Gbps"),
+    _provisioned_case("provisioned_speed_up", "100Mbps"),
+    _provisioned_case("provisioned_burst_down", "1.2Gbps"),
+    _provisioned_case("provisioned_burst_up", "150Mbps"),
+    (
+        "all_four",
+        {f: "x" for f in _PROVISIONED_FIELDS},
+        [f"sensor.modem_{f}" for f in _PROVISIONED_FIELDS],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "system_info,expected",
+    [(c[1], c[2]) for c in _PROVISIONED_SPEED_CASES],
+    ids=[c[0] for c in _PROVISIONED_SPEED_CASES],
+)
+def test_build_provisioned_speed_entities(system_info: dict[str, Any], expected: list[str]) -> None:
+    """One entity emitted per present provisioned-speed/burst field."""
+    from custom_components.cable_modem_monitor.services import (
+        _build_provisioned_speed_entities,
+    )
+
+    joined = "\n".join(_build_provisioned_speed_entities("modem", system_info))
+    for entity_id in expected:
+        assert entity_id in joined
+    if not expected:
+        assert joined == ""
+
+
+def test_build_status_card_includes_docsis_status_when_present() -> None:
+    """docsis_status field present → status entity emitted into the card YAML."""
+    lines = _build_status_card_yaml(
+        "modem",
+        {"docsis_status": "operational"},
+        has_icmp=False,
+        has_head=False,
+    )
+    joined = "\n".join(lines)
+    assert "sensor.modem_docsis_status" in joined
+    assert "Modem Status" in joined
+
+
+def test_build_channel_graph_defs_number_mode_omits_channel_type() -> None:
+    """NUMBER-mode entity patterns omit the {ch_type} segment."""
+    from custom_components.cable_modem_monitor.const import ChannelIdentity
+    from custom_components.cable_modem_monitor.services import (
+        _build_channel_graph_defs,
+    )
+
+    defs = _build_channel_graph_defs(
+        entity_prefix="modem",
+        identity_mode=ChannelIdentity.NUMBER,
+        downstream_info=[("", 1)],
+        upstream_info=[("", 1)],
+    )
+    patterns = [pattern for (_key, _info, _title, pattern) in defs]
+    # Every pattern uses the number-mode shape: sensor.{prefix}_{dir}_ch_{ch_id}_{metric}
+    for p in patterns:
+        assert "{ch_type}" not in p
+        assert "_ch_{ch_id}" in p

@@ -34,9 +34,14 @@ directory layout and multi-variant assembly contract.
 
 ## Schema Overview
 
+> **Manufacturer is stored as the modem reports it / as the
+> manufacturer styles their brand.** Don't pre-normalize case here.
+> Display layers handle normalization for readability. The example
+> below uses `ARRIS` because that's how the SB8200 self-identifies.
+
 ```yaml
 # Identity
-manufacturer: "Arris"
+manufacturer: "ARRIS"
 model: "SB8200"
 model_aliases:                    # optional — search matching only (not shown in UI)
   - "CommScope SB8200"
@@ -73,8 +78,8 @@ timeout: 15
 
 # Health (optional, defaults are correct for most modems)
 health:
-  http_probe: false      # disable HTTP probes for fragile modems
-  supports_head: false   # modem rejects HTTP HEAD (use GET)
+  http_probe: false      # disable TCP/HEAD probes for fragile modems
+  supports_head: false   # modem rejects HTTP HEAD (HEAD probe skipped, no fallback)
   supports_icmp: true    # hint; auto-detection overrides at setup
 
 # Metadata
@@ -259,6 +264,31 @@ config: `username_field`, `password_field` entries, and
 Both are optional; if both present, both must pass. If `success` is
 omitted, any response with HTTP status < 400 is treated as success.
 
+**When to leave `success` omitted:** Many modems return 200 plus the
+login page body when credentials are rejected (e.g., MB7621 returns
+a 200 redirect chain ending at `/login.asp`). The loose check above
+classifies this as auth success; the loader's `Data page X appears
+to be a login page` detection then catches the mismatch on the next
+fetch and surfaces it as `LOAD_AUTH`. That defense-in-depth is the
+intended backstop and works correctly in practice.
+
+Tightening via `success.redirect` to "fix" this class of modem
+behavior is a rejected pattern. Post-auth landing URLs are
+firmware-version-coupled — new firmware that lands on a different
+page (firmware-update prompt, change-password flow, captive state)
+breaks auth where it didn't before. A prior alpha cycle hit this
+from the other direction: a `Login redirect mismatch: expected
+path containing '/DocsisStatus.htm', got '/ErrorMsg.htm'` error
+looked like a regression and a softening fix was drafted, but the
+strict check was correctly identifying a real auth failure that
+softening would have masked. The principle runs both directions —
+don't tighten via redirect when the loose check is fine; don't
+soften the redirect check when it's catching real failures.
+Configure `success.redirect` only when the modem has a stable,
+well-known post-auth landing path that doesn't drift across
+firmware updates and the loose check produces an unacceptable
+failure mode for that specific modem.
+
 Evidence: modems with HTML login forms. Encoding, field names, and
 success indicators vary by manufacturer. Both `goform` and `cgi-bin`
 style endpoints are common.
@@ -421,15 +451,18 @@ auth:
 1. **Data page detection:** Response body **contains** `success_indicator`
    → the body is the data page itself (modem served data directly during
    login). Token is `None` — no URL injection needed. The response is
-   passed to the loader as an auth response reuse candidate.
+   passed to the loader as an auth response reuse candidate
+   (`AuthResult.response` and `AuthResult.response_url` are set).
 2. **Token extraction gate:** Response body **does not contain** indicator
    → the body is treated as a server-issued session token (typically
    20-40 chars alphanumeric). Extracted via `response.text.strip()` →
-   `auth_context.url_token`.
+   `auth_context.url_token`. `AuthResult.response`/`response_url` MUST
+   stay unset — see reuse contract below.
 3. **Empty body fallback:** Body is empty → fall back to cookie via
-   `cookie_name`.
+   `cookie_name`. `AuthResult.response`/`response_url` MUST stay unset.
 4. **Empty cookie fallback:** Cookie is empty → no token injection
-   (loader attempts without).
+   (loader attempts without). `AuthResult.response`/`response_url`
+   MUST stay unset.
 
 The collector prefers `auth_context.url_token` (body-derived) over
 cookie extraction when both are available. This ordering matters because
@@ -439,6 +472,16 @@ differs from the cookie value.
 Without the `success_indicator` guard, the auth manager would use an
 entire HTML data page as a URL parameter, silently breaking any
 url_token variant where the login response returns data directly.
+
+**Reuse contract — load-bearing for url_token.** The login URL and a
+parser data page often share the same path (SB8200 logs in at
+`/cmconnectionstatus.html` and parses the same path). Branches 2-4
+above produce a non-data-page response at that path; advertising it
+for loader reuse causes the loader to surface the auth artefact —
+or empty body — as the parsed data page and skip the real fetch.
+See `RESOURCE_LOADING_SPEC.md` § Auth Response Reuse and the
+`AuthResult` docstring in `auth/base.py` for the full contract.
+Regression: SB8200 #81 (v3.14.0-beta.2 dtaubert — 0/0 channels).
 
 **Pre-login cookie clearing:** Before the login request, the auth
 manager deletes any existing session cookie (`cookie_name`) from the
@@ -730,7 +773,7 @@ session:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `max_concurrent` | int | `0` | Max concurrent sessions. `0` = unlimited. `1` = single-session modem. |
-| `headers` | map | `{}` | Static headers added to all requests for this session (e.g., `X-Requested-With: XMLHttpRequest` for SPA-style modems). Dynamic headers (CSRF tokens, HNAP signatures, auth tokens) are managed by auth strategies — each strategy defines its own fields for token acquisition and header injection. |
+| `headers` | map | `{}` | Static headers added to all requests for this session (e.g., `X-Requested-With: XMLHttpRequest` for SPA-style modems). Header values support the `{base_url}` placeholder, which resolves to the modem's URL at session-build time — used for `Referer`/`Origin` headers that some modems validate against their own origin. Dynamic headers (CSRF tokens, HNAP signatures, auth tokens) are managed by auth strategies — each strategy defines its own fields for token acquisition and header injection. |
 | `query_params` | map | `{}` | Static query parameters appended to all data-fetch URLs (e.g., `_n: "12345"` for Arris firmware that requires a cache-buster nonce on AJAX requests). Not used for auth-managed tokens — those go through `auth.token_prefix`. |
 
 ### Stateless
@@ -779,6 +822,13 @@ If the user (or another client) is already logged in when we attempt
 to poll, login fails with `AuthResult.FAILURE` and status reports
 `auth_failed`. Recovery happens naturally when the other session ends
 (explicit logout or modem-side timeout).
+
+> **Scope of `max_concurrent`** — this field controls *session
+> lifecycle* (whether the integration must logout after each poll),
+> not *session reuse strategy* (whether the integration tries to
+> reuse a cached session across polls). Reuse strategy is
+> runtime-detected by core (see RUNTIME_POLLING_SPEC.md "Adaptive
+> reuse disable") and is intentionally not configurable per modem.
 
 See RUNTIME_POLLING_SPEC.md for the full session lifecycle.
 
@@ -1028,18 +1078,23 @@ this modem.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `http_probe` | bool | `true` | Whether HTTP health probes are enabled |
+| `http_probe` | bool | `true` | Whether TCP and HEAD health probes are enabled |
 | `supports_head` | bool | `true` | Whether the modem handles HTTP HEAD correctly |
 | `supports_icmp` | bool | `true` | Whether ICMP ping is expected to work |
 
-When `http_probe` is `false`, the HealthMonitor skips HTTP HEAD/GET
-probes entirely — only ICMP runs (if supported). Use this for fragile
-modems where every HTTP request carries crash risk (e.g., S33v2, #117).
+When `http_probe` is `false`, the HealthMonitor skips both the TCP
+and HEAD probes entirely — only ICMP runs (if supported). Use this
+for fragile modems where every HTTP-stack interaction carries crash
+risk (e.g., S33v2, #117).
 
-When `supports_head` is `false`, the HealthMonitor uses GET instead
-of HEAD for HTTP probes. Some modems return 405 or unexpected
-responses to HEAD requests. This is a modem characteristic — set
-per-model in modem.yaml.
+When `supports_head` is `false`, the HealthMonitor **skips the HEAD
+probe entirely** — there is no GET fallback. The TCP probe still
+runs as the L4 reachability signal; HEAD is purely a latency-only
+metric and skipping it on incompatible modems leaves the
+`http_latency_ms` field None rather than corrupting it with bimodal
+GET timing. Some modems return 405 or unexpected responses to HEAD
+requests; this is a modem characteristic — set per-model in
+modem.yaml.
 
 `supports_icmp` is a network-dependent hint. Auto-detection during
 setup overrides this default. User options override both. Useful for
@@ -1139,7 +1194,7 @@ rules below.
 
 | Transport | Valid auth strategies | Valid session | Valid formats | Valid action types |
 |-----------|---------------------|--------------|---------------|-------------------|
-| `http` | `none`, `basic`, `form`, `form_nonce`, `url_token`, `form_pbkdf2`, `form_sjcl` | stateless, cookie, CSRF, url_token | `table`, `table_transposed`, `html_fields`, `javascript`, `javascript_json`, `json` | `http` |
+| `http` | `none`, `basic`, `form`, `form_nonce`, `url_token`, `form_pbkdf2`, `form_sjcl` | stateless, cookie, CSRF, url_token | `table`, `table_transposed`, `html_fields`, `javascript`, `javascript_json`, `json`, `json_transposed` | `http` |
 | `hnap` | `hnap` | implicit (uid + HNAP_AUTH) | `hnap` | `hnap` |
 | `cbn` | `form_cbn` | cookie (rotating sessionToken + stable SID) | `xml` | `cbn` |
 

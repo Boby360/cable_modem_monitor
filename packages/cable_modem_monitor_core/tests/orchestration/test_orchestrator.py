@@ -223,7 +223,7 @@ class TestFirstPoll:
         assert m.session_is_valid is True
         assert m.poll_duration is not None
         assert m.poll_duration >= 0
-        assert m.last_poll_timestamp is not None
+        assert m.last_poll_at is not None
 
 
 class TestSessionReuse:
@@ -452,10 +452,7 @@ class TestStreakReset:
         )
         orch = _make_orchestrator(collector=collector)
 
-        orch.get_modem_data()  # LOAD_AUTH: streak → 1 (session issue, not credential rejection)
-        assert orch.diagnostics().auth_failure_streak == 1
-
-        orch.get_modem_data()  # success → streak → 0
+        orch.get_modem_data()  # LOAD_AUTH retried in same poll, success keeps streak at 0
         assert orch.diagnostics().auth_failure_streak == 0
         assert orch.diagnostics().circuit_breaker_open is False
 
@@ -527,7 +524,7 @@ class TestCircuitBreaker:
 
     def test_load_auth_uses_threshold(self) -> None:
         """LOAD_AUTH is a session issue — circuit trips at threshold, not immediately."""
-        results = [_fail_result(CollectorSignal.LOAD_AUTH) for _ in range(5)]
+        results = [_fail_result(CollectorSignal.LOAD_AUTH) for _ in range(10)]
         collector = _mock_collector(results)
         orch = _make_orchestrator(collector=collector)
 
@@ -566,7 +563,7 @@ class TestLoadAuth:
     """UC-17/18/19: LOAD_AUTH signal handling."""
 
     def test_load_auth_clears_session(self) -> None:
-        """UC-17: LOAD_AUTH clears session and increments streak."""
+        """UC-17: LOAD_AUTH clears session and increments streak on retry failure."""
         collector = _mock_collector(_fail_result(CollectorSignal.LOAD_AUTH))
         orch = _make_orchestrator(collector=collector)
 
@@ -574,10 +571,11 @@ class TestLoadAuth:
 
         assert snapshot.connection_status == ConnectionStatus.AUTH_FAILED
         assert orch.diagnostics().auth_failure_streak == 1
-        collector.clear_session.assert_called_once()
+        assert collector.execute.call_count == 2
+        collector.clear_session.assert_called()
 
-    def test_load_auth_self_corrects(self) -> None:
-        """UC-18: LOAD_AUTH → fresh login → success."""
+    def test_load_auth_recovers_in_same_poll(self) -> None:
+        """UC-18: LOAD_AUTH retries once immediately and returns success."""
         collector = _mock_collector(
             [
                 _fail_result(CollectorSignal.LOAD_AUTH),
@@ -586,15 +584,33 @@ class TestLoadAuth:
         )
         orch = _make_orchestrator(collector=collector)
 
-        orch.get_modem_data()  # LOAD_AUTH, session cleared
-        snapshot = orch.get_modem_data()  # fresh login → success
+        snapshot = orch.get_modem_data()
+
+        assert snapshot.connection_status == ConnectionStatus.ONLINE
+        assert orch.diagnostics().auth_failure_streak == 0
+        assert collector.execute.call_count == 2
+        collector.clear_session.assert_called_once()
+
+    def test_load_auth_self_corrects(self) -> None:
+        """UC-18: a later successful poll leaves the streak clear."""
+        collector = _mock_collector(
+            [
+                _fail_result(CollectorSignal.LOAD_AUTH),
+                _ok_result(),
+                _ok_result(),
+            ]
+        )
+        orch = _make_orchestrator(collector=collector)
+
+        orch.get_modem_data()  # LOAD_AUTH retried in same poll → success
+        snapshot = orch.get_modem_data()  # steady-state success
 
         assert snapshot.connection_status == ConnectionStatus.ONLINE
         assert orch.diagnostics().auth_failure_streak == 0
 
     def test_load_auth_escalates_to_circuit(self) -> None:
         """Persistent LOAD_AUTH eventually trips circuit breaker."""
-        results = [_fail_result(CollectorSignal.LOAD_AUTH) for _ in range(6)]
+        results = [_fail_result(CollectorSignal.LOAD_AUTH) for _ in range(12)]
         collector = _mock_collector(results)
         orch = _make_orchestrator(collector=collector)
 
@@ -602,6 +618,143 @@ class TestLoadAuth:
             orch.get_modem_data()
 
         assert orch.diagnostics().circuit_breaker_open is True
+
+    def test_load_auth_recovery_streak_resets_on_normal_success(self) -> None:
+        """A normal poll breaks the consecutive stale-session recovery streak."""
+        collector = _mock_collector(
+            [
+                _fail_result(CollectorSignal.LOAD_AUTH),
+                _ok_result(),
+                _ok_result(),
+                _fail_result(CollectorSignal.LOAD_AUTH),
+                _ok_result(),
+            ]
+        )
+        orch = _make_orchestrator(collector=collector)
+
+        orch.get_modem_data()
+        diag = orch.diagnostics()
+        assert diag.stale_session_recovery_streak == 1
+        assert diag.session_reuse_disabled is False
+
+        orch.get_modem_data()
+        diag = orch.diagnostics()
+        assert diag.stale_session_recovery_streak == 0
+        assert diag.session_reuse_disabled is False
+
+        orch.get_modem_data()
+        diag = orch.diagnostics()
+        assert diag.stale_session_recovery_streak == 1
+        assert diag.session_reuse_disabled is False
+
+
+class TestLoadIntegrity:
+    """UC-19a: LOAD_INTEGRITY signal handling — stub-page recovery (issue #151)."""
+
+    def test_load_integrity_clears_session_and_increments_streak(self) -> None:
+        """Persistent stub response → clears session, streak=1, status=AUTH_FAILED."""
+        collector = _mock_collector(_fail_result(CollectorSignal.LOAD_INTEGRITY))
+        orch = _make_orchestrator(collector=collector)
+
+        snapshot = orch.get_modem_data()
+
+        assert snapshot.connection_status == ConnectionStatus.AUTH_FAILED
+        assert orch.diagnostics().auth_failure_streak == 1
+        # Same-poll retry — collector executed twice
+        assert collector.execute.call_count == 2
+        collector.clear_session.assert_called()
+
+    def test_load_integrity_recovers_in_same_poll(self) -> None:
+        """First poll stub → cleared session → second poll real data → ONLINE."""
+        collector = _mock_collector(
+            [
+                _fail_result(CollectorSignal.LOAD_INTEGRITY),
+                _ok_result(),
+            ]
+        )
+        orch = _make_orchestrator(collector=collector)
+
+        snapshot = orch.get_modem_data()
+
+        # Recovers within the same poll, no AUTH_FAILED surfaced
+        assert snapshot.connection_status == ConnectionStatus.ONLINE
+        assert orch.diagnostics().auth_failure_streak == 0
+        assert collector.execute.call_count == 2
+        collector.clear_session.assert_called_once()
+
+    def test_load_integrity_escalates_to_circuit_breaker(self) -> None:
+        """Sustained stub responses eventually trip the circuit breaker."""
+        results = [_fail_result(CollectorSignal.LOAD_INTEGRITY) for _ in range(12)]
+        collector = _mock_collector(results)
+        orch = _make_orchestrator(collector=collector)
+
+        for _ in range(6):
+            orch.get_modem_data()
+
+        assert orch.diagnostics().circuit_breaker_open is True
+
+
+class TestLoadAuthAdaptiveReuse:
+    """UC-18 follow-on: stale-session recovery streak adapts session reuse."""
+
+    def test_load_auth_disables_reuse_after_two_consecutive_recoveries(self) -> None:
+        """Two consecutive stale-session recoveries disable reuse for this runtime."""
+        collector = _mock_collector(
+            [
+                _fail_result(CollectorSignal.LOAD_AUTH),
+                _ok_result(),
+                _fail_result(CollectorSignal.LOAD_AUTH),
+                _ok_result(),
+                _ok_result(),
+            ]
+        )
+        orch = _make_orchestrator(collector=collector)
+
+        orch.get_modem_data()
+        diag = orch.diagnostics()
+        assert diag.stale_session_recovery_streak == 1
+        assert diag.session_reuse_disabled is False
+
+        orch.get_modem_data()
+        diag = orch.diagnostics()
+        assert diag.stale_session_recovery_streak == 2
+        assert diag.session_reuse_disabled is True
+
+        collector.clear_session.reset_mock()
+        orch.get_modem_data()
+
+        assert collector.execute.call_count == 5
+        collector.clear_session.assert_called_once()
+
+    def test_reset_auth_clears_adaptive_reuse_state(self) -> None:
+        """Credential reset re-enables session reuse and clears the counter."""
+        collector = _mock_collector(
+            [
+                _fail_result(CollectorSignal.LOAD_AUTH),
+                _ok_result(),
+                _fail_result(CollectorSignal.LOAD_AUTH),
+                _ok_result(),
+                _fail_result(CollectorSignal.LOAD_AUTH),
+                _ok_result(),
+            ]
+        )
+        orch = _make_orchestrator(collector=collector)
+
+        orch.get_modem_data()
+        orch.get_modem_data()
+        assert orch.diagnostics().session_reuse_disabled is True
+
+        orch.reset_auth()
+
+        diag = orch.diagnostics()
+        assert diag.stale_session_recovery_streak == 0
+        assert diag.session_reuse_disabled is False
+
+        collector.clear_session.reset_mock()
+        orch.get_modem_data()
+
+        assert collector.execute.call_count == 6
+        collector.clear_session.assert_called_once()
 
 
 class TestPasswordChanged:
@@ -1004,7 +1157,7 @@ class TestUnplannedRestart:
     """UC-49: Modem restarted externally — recovery through normal polling."""
 
     def test_outage_and_recovery_sequence(self) -> None:
-        """ONLINE → UNREACHABLE (with backoff) → LOAD_AUTH → ONLINE."""
+        """ONLINE → UNREACHABLE (with backoff) → LOAD_AUTH retry → ONLINE."""
         collector = _mock_collector()
         orch = _make_orchestrator(collector=collector)
 
@@ -1018,19 +1171,16 @@ class TestUnplannedRestart:
         snap = orch.get_modem_data()
         assert snap.connection_status == ConnectionStatus.UNREACHABLE
 
-        # Poll 3: Backoff clears, modem back but stale session — LOAD_AUTH
-        collector.execute.return_value = _fail_result(CollectorSignal.LOAD_AUTH, "401 on data page")
+        # Poll 3: Backoff clears, modem back but stale session — retry succeeds same poll
+        collector.execute.side_effect = [
+            _fail_result(CollectorSignal.LOAD_AUTH, "401 on data page"),
+            _ok_result(),
+        ]
         snap = orch.get_modem_data()
-        assert snap.connection_status == ConnectionStatus.AUTH_FAILED
-        # Session should have been cleared by LOAD_AUTH policy
+        assert snap.connection_status == ConnectionStatus.ONLINE
         collector.clear_session.assert_called()
         # Connectivity cleared because modem responded
         assert orch.diagnostics().connectivity_streak == 0
-
-        # Poll 4: Fresh login succeeds — ONLINE
-        collector.execute.return_value = _ok_result()
-        snap = orch.get_modem_data()
-        assert snap.connection_status == ConnectionStatus.ONLINE
 
     def test_connectivity_never_trips_circuit_breaker(self) -> None:
         """CONNECTIVITY failures never trip the auth circuit breaker."""
@@ -1046,7 +1196,7 @@ class TestUnplannedRestart:
         assert not orch.diagnostics().circuit_breaker_open
 
     def test_stale_session_self_corrects(self, caplog: pytest.LogCaptureFixture) -> None:
-        """LOAD_AUTH clears session, next poll authenticates fresh."""
+        """LOAD_AUTH clears session and recovers within the same poll."""
         collector = _mock_collector()
         orch = _make_orchestrator(collector=collector)
 
@@ -1055,16 +1205,15 @@ class TestUnplannedRestart:
         orch.get_modem_data()
 
         # Stale session detected
-        collector.execute.return_value = _fail_result(CollectorSignal.LOAD_AUTH, "401 on data page")
+        collector.execute.side_effect = [
+            _fail_result(CollectorSignal.LOAD_AUTH, "401 on data page"),
+            _ok_result(),
+        ]
         with caplog.at_level(logging.INFO):
-            orch.get_modem_data()
+            snap = orch.get_modem_data()
 
         assert "LOAD_AUTH" in caplog.text
-        collector.clear_session.assert_called()
-
-        # Fresh login succeeds
-        collector.execute.return_value = _ok_result()
-        snap = orch.get_modem_data()
+        collector.clear_session.assert_called_once()
         assert snap.connection_status == ConnectionStatus.ONLINE
 
 
@@ -1230,7 +1379,7 @@ class TestDiagnostics:
         assert m.circuit_breaker_open is False
         assert m.connectivity_streak == 0
         assert m.connectivity_backoff_remaining == 0
-        assert m.last_poll_timestamp is None
+        assert m.last_poll_at is None
 
     def test_diagnostics_after_successful_poll(self) -> None:
         """Diagnostics reflect latest poll."""
@@ -1243,7 +1392,7 @@ class TestDiagnostics:
         assert m.auth_failure_streak == 0
         assert m.circuit_breaker_open is False
         assert m.session_is_valid is True
-        assert m.last_poll_timestamp is not None
+        assert m.last_poll_at is not None
 
     def test_diagnostics_after_failure(self) -> None:
         """Diagnostics track auth failure streak."""
@@ -1655,7 +1804,7 @@ class TestHealthRecoveryClearsBackoff:
         assert orch.diagnostics().connectivity_streak == 0
         assert orch.diagnostics().connectivity_backoff_remaining == 0
 
-    def test_stale_responsive_probe_does_not_clear_backoff(self) -> None:
+    def test_stale_responsive_probe_does_not_clear_backoff(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Cached RESPONSIVE from before the outage must NOT clear backoff.
 
         Regression guard for the MB7621 hardware observation at
@@ -1665,7 +1814,13 @@ class TestHealthRecoveryClearsBackoff:
         while the modem is actually down. The orchestrator's
         freshness check must ignore a probe whose timestamp pre-
         dates the last observed CONNECTIVITY failure.
+
+        Time is mocked across every poll: ``time.monotonic`` is
+        host-dependent (seconds since boot) and would otherwise
+        return small values on freshly booted CI runners, breaking
+        the freshness comparison against the literal probe time.
         """
+        import solentlabs.cable_modem_monitor_core.orchestration.orchestrator as orch_module
         from solentlabs.cable_modem_monitor_core.orchestration.models import HealthInfo
         from solentlabs.cable_modem_monitor_core.orchestration.signals import HealthStatus
 
@@ -1679,36 +1834,25 @@ class TestHealthRecoveryClearsBackoff:
         collector.execute.return_value = _fail_result(CollectorSignal.CONNECTIVITY)
         orch = _make_orchestrator(collector=collector, health_monitor=health_monitor)
 
-        # First poll observes the connectivity failure. Monkey-patch
-        # time.monotonic so the recorded failure timestamp is well
-        # after the probe's 100.0.
-        import solentlabs.cable_modem_monitor_core.orchestration.orchestrator as orch_module
+        # Pin orchestrator time to t=200.0 for every poll. The
+        # exact value doesn't matter — only that it's > 100.0
+        # (the probe time) so the freshness check correctly
+        # classifies the cached probe as stale.
+        monkeypatch.setattr(orch_module.time, "monotonic", lambda: 200.0)
 
-        orig_monotonic = orch_module.time.monotonic
-        orch_module.time.monotonic = lambda: 200.0  # type: ignore[assignment]
-        try:
-            orch.get_modem_data()
-        finally:
-            orch_module.time.monotonic = orig_monotonic
-
-        # Backoff is now 1. Second poll would normally check the
-        # shortcut. The cached RESPONSIVE reading is stale (probe
-        # at t=100 < failure at t=200), so the shortcut must NOT
-        # fire — backoff decrements normally and the poll is
-        # skipped (backoff was 1, check decrements to 0 and allows
-        # the poll, then fails again).
+        # Poll 1: connectivity failure → backoff=1
+        orch.get_modem_data()
         assert orch.diagnostics().connectivity_backoff_remaining == 1
 
-        # Drive a second failure so backoff grows to 2.
+        # Poll 2: backoff was 1, decrements to 0, poll runs, fails → backoff=2
         orch.get_modem_data()
-
         assert orch.diagnostics().connectivity_backoff_remaining == 2
 
-        # Now a third poll. backoff > 0, health is cached RESPONSIVE,
-        # but latest_probe_at (100.0) is older than the most recent
-        # connectivity failure. The shortcut must stay closed —
-        # backoff decrements to 1 and the poll is skipped (reports
-        # UNREACHABLE without invoking the collector).
+        # Poll 3: backoff>0, health is cached RESPONSIVE, but
+        # latest_probe_at (100.0) < _last_connectivity_failure_at
+        # (200.0). Shortcut must stay closed — backoff decrements
+        # to 1 and the poll is skipped (UNREACHABLE without
+        # invoking the collector).
         call_count_before = collector.execute.call_count
         snapshot = orch.get_modem_data()
 
@@ -1717,12 +1861,15 @@ class TestHealthRecoveryClearsBackoff:
         # Backoff ticked down normally (2 → 1), not cleared.
         assert orch.diagnostics().connectivity_backoff_remaining == 1
 
-    def test_fresh_responsive_probe_still_clears_backoff(self) -> None:
+    def test_fresh_responsive_probe_still_clears_backoff(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A probe that ran AFTER the last failure correctly clears backoff.
 
         Complement to the stale-probe test: confirms the freshness
-        gate doesn't accidentally break the legitimate case.
+        gate doesn't accidentally break the legitimate case. ``time``
+        is mocked across every poll for the same host-determinism
+        reason as the stale-probe test.
         """
+        import solentlabs.cable_modem_monitor_core.orchestration.orchestrator as orch_module
         from solentlabs.cable_modem_monitor_core.orchestration.models import HealthInfo
         from solentlabs.cable_modem_monitor_core.orchestration.signals import HealthStatus
 
@@ -1735,16 +1882,14 @@ class TestHealthRecoveryClearsBackoff:
         collector.execute.return_value = _fail_result(CollectorSignal.CONNECTIVITY)
         orch = _make_orchestrator(collector=collector, health_monitor=health_monitor)
 
-        # Two failures to build backoff.
-        import solentlabs.cable_modem_monitor_core.orchestration.orchestrator as orch_module
+        # Pin orchestrator time to t=200.0 — failures recorded here
+        # land between the stale probe (100.0) and the fresh probe
+        # (300.0) introduced below.
+        monkeypatch.setattr(orch_module.time, "monotonic", lambda: 200.0)
 
-        orig_monotonic = orch_module.time.monotonic
-        orch_module.time.monotonic = lambda: 200.0  # type: ignore[assignment]
-        try:
-            orch.get_modem_data()
-            orch.get_modem_data()
-        finally:
-            orch_module.time.monotonic = orig_monotonic
+        # Two failures to build backoff.
+        orch.get_modem_data()
+        orch.get_modem_data()
 
         assert orch.diagnostics().connectivity_backoff_remaining == 2
 

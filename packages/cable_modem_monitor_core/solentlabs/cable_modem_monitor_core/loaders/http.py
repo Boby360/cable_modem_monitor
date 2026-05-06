@@ -19,15 +19,18 @@ import requests
 from bs4 import BeautifulSoup
 
 from ..auth.base import AuthResult
+from ..models.parser_config.config import ALL_FORMAT_MODELS
+from ..models.parser_config.format_registry import lookup_decode_kind
+from .diagnostics import describe_request
 from .fetch_list import ResourceTarget
 
 _logger = logging.getLogger(__name__)
 
-# Formats decoded as HTML (BeautifulSoup)
-_HTML_FORMATS = frozenset({"table", "table_transposed", "javascript", "javascript_json", "html_fields"})
 
-# Formats decoded as structured data (dict)
-_STRUCTURED_FORMATS = frozenset({"json", "xml"})
+def _decode_kind(fmt: str) -> str:
+    """Return the loader's decode_kind for a format tag, or empty string."""
+    kind = lookup_decode_kind(fmt, ALL_FORMAT_MODELS)
+    return kind or ""
 
 
 class HTTPResourceLoader:
@@ -63,6 +66,7 @@ class HTTPResourceLoader:
         detect_login_pages: bool = False,
         model: str = "",
         query_params: dict[str, str] | None = None,
+        headers: frozenset[str] = frozenset(),
     ) -> None:
         self._session = session
         self._base_url = base_url.rstrip("/")
@@ -72,6 +76,7 @@ class HTTPResourceLoader:
         self._detect_login_pages = detect_login_pages
         self._model = model
         self._query_params = query_params or {}
+        self._headers = headers
         self.resource_fetches: list[tuple[str, float, int, int, str]] = []
 
     def fetch(
@@ -155,14 +160,16 @@ class HTTPResourceLoader:
 
             if response.status_code in (401, 403):
                 raise ResourceLoadError(
-                    f"HTTP {response.status_code} on {target.path}" " — session likely expired",
+                    f"HTTP {response.status_code} on {target.path} — session likely expired"
+                    f"\n  request: {describe_request(response.request, headers=self._headers)}",
                     status_code=response.status_code,
                     path=target.path,
                 )
 
             if response.status_code >= 400:
                 raise ResourceLoadError(
-                    f"HTTP {response.status_code} fetching {target.path}",
+                    f"HTTP {response.status_code} fetching {target.path}"
+                    f"\n  request: {describe_request(response.request, headers=self._headers)}",
                     status_code=response.status_code,
                     path=target.path,
                 )
@@ -174,7 +181,7 @@ class HTTPResourceLoader:
             if (
                 self._detect_login_pages
                 and response.status_code == 200
-                and target.format in _HTML_FORMATS
+                and _decode_kind(target.format) == "html"
                 and _is_login_page(response.text)
             ):
                 _logger.warning(
@@ -278,23 +285,24 @@ def _decode_response(
             _logger.debug("Failed to base64-decode response")
             return None
 
-    if fmt in _HTML_FORMATS:
+    kind = _decode_kind(fmt)
+
+    if kind == "html":
         return BeautifulSoup(text, "html.parser")
 
-    if fmt in _STRUCTURED_FORMATS:
-        if fmt == "json":
-            try:
-                data = json.loads(text)
-            except json.JSONDecodeError:
-                _logger.warning("Response is not valid JSON")
-                return None
-            if not isinstance(data, dict):
-                return {"_raw": data}
-            return data
-
-        if fmt == "xml":
-            _logger.warning("XML format not yet supported by loader")
+    if kind == "json":
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            _logger.warning("Response is not valid JSON")
             return None
+        if not isinstance(data, dict):
+            return {"_raw": data}
+        return data
+
+    if kind == "xml":
+        _logger.warning("XML format not yet supported by loader")
+        return None
 
     _logger.warning("Unknown format '%s', returning as BeautifulSoup", fmt)
     return BeautifulSoup(text, "html.parser")

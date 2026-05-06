@@ -219,60 +219,21 @@ def test_login_failure(
 
     assert result.success is False
     assert error_substring in result.error
+    assert result.response is not None
 
 
-# ┌────────────────────┬─────────────────────────────────┐
-# │ json_value         │ description                     │
-# ├────────────────────┼─────────────────────────────────┤
-# │ "not a dict"       │ string response                 │
-# │ [1, 2, 3]          │ list response                   │
-# │ 42                 │ integer response                │
-# └────────────────────┴─────────────────────────────────┘
-#
-# fmt: off
-HNAP_NOT_DICT_CASES = [
-    # (json_value,    description)
-    ("not a dict",    "string response"),
-    ([1, 2, 3],       "list response"),
-    (42,              "integer response"),
-]
-# fmt: on
+# ---------------------------------------------------------------------------
+# Failure-scenario setup helpers — drive the full HNAP failure surface from
+# a single parameterized test. Each helper configures session.post via mock
+# so a single call yields the desired response (or raises an exception).
+# ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "json_value,desc",
-    HNAP_NOT_DICT_CASES,
-    ids=[c[1] for c in HNAP_NOT_DICT_CASES],
-)
-def test_challenge_response_not_dict(json_value: object, desc: str) -> None:
-    """Reports error when HNAP challenge response JSON is not a dict."""
-    manager = _make_manager()
-    session = requests.Session()
-
+def _challenge_ok() -> MagicMock:
+    """Valid challenge response with all required LoginResponse fields."""
     resp = MagicMock()
     resp.status_code = 200
-    resp.json.return_value = json_value
-
-    with patch.object(session, "post", return_value=resp):
-        result = manager.authenticate(session, "http://192.168.100.1", "admin", "pw")
-
-    assert result.success is False
-    assert "json object" in result.error.lower()
-
-
-@pytest.mark.parametrize(
-    "json_value,desc",
-    HNAP_NOT_DICT_CASES,
-    ids=[c[1] for c in HNAP_NOT_DICT_CASES],
-)
-def test_login_response_not_dict(json_value: object, desc: str) -> None:
-    """Reports error when HNAP login response JSON is not a dict."""
-    manager = _make_manager()
-    session = requests.Session()
-
-    challenge_resp = MagicMock()
-    challenge_resp.status_code = 200
-    challenge_resp.json.return_value = {
+    resp.json.return_value = {
         "LoginResponse": {
             "Challenge": _HNAPHandler.challenge,
             "PublicKey": _HNAPHandler.public_key,
@@ -280,26 +241,142 @@ def test_login_response_not_dict(json_value: object, desc: str) -> None:
             "LoginResult": "OK",
         },
     }
+    return resp
 
-    login_resp = MagicMock()
-    login_resp.status_code = 200
-    login_resp.json.return_value = json_value
+
+def _resp_with_json(json_value: Any) -> MagicMock:
+    """Build a status-200 response that returns ``json_value`` from .json()."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = json_value
+    return resp
+
+
+def _setup_challenge_request_exception(mock_post: MagicMock) -> None:
+    mock_post.side_effect = requests.RequestException("redirects")
+
+
+def _setup_challenge_not_dict_string(mock_post: MagicMock) -> None:
+    mock_post.return_value = _resp_with_json("not a dict")
+
+
+def _setup_challenge_not_dict_list(mock_post: MagicMock) -> None:
+    mock_post.return_value = _resp_with_json([1, 2, 3])
+
+
+def _setup_challenge_not_dict_int(mock_post: MagicMock) -> None:
+    mock_post.return_value = _resp_with_json(42)
+
+
+def _setup_challenge_missing_fields(mock_post: MagicMock) -> None:
+    """LoginResponse is a dict but lacks Challenge/PublicKey/Cookie."""
+    mock_post.return_value = _resp_with_json({"LoginResponse": {}})
+
+
+def _setup_login_request_exception(mock_post: MagicMock) -> None:
+    mock_post.side_effect = [_challenge_ok(), requests.RequestException("redirects")]
+
+
+def _setup_login_not_dict_string(mock_post: MagicMock) -> None:
+    mock_post.side_effect = [_challenge_ok(), _resp_with_json("not a dict")]
+
+
+def _setup_login_not_dict_list(mock_post: MagicMock) -> None:
+    mock_post.side_effect = [_challenge_ok(), _resp_with_json([1, 2, 3])]
+
+
+def _setup_login_not_dict_int(mock_post: MagicMock) -> None:
+    mock_post.side_effect = [_challenge_ok(), _resp_with_json(42)]
+
+
+def _setup_login_unexpected_result(mock_post: MagicMock) -> None:
+    """LoginResult is dict-shaped but value isn't OK/OK_CHANGED/FAILED/LOCKUP/REBOOT."""
+    mock_post.side_effect = [
+        _challenge_ok(),
+        _resp_with_json({"LoginResponse": {"LoginResult": "UNKNOWN_STATUS"}}),
+    ]
+
+
+# ┌────────────────────────────────┬────────────────────────────────────┬────────────────────────┬──────────────────┐
+# │ description                    │ setup_fn                           │ expected_error         │ expects_response │
+# ├────────────────────────────────┼────────────────────────────────────┼────────────────────────┼──────────────────┤
+# │ challenge_request_exception    │ non-connectivity RequestException  │ "challenge request"    │ False            │
+# │ challenge_not_dict_*           │ challenge body is non-dict JSON    │ "expected json object" │ True             │
+# │ challenge_missing_fields       │ challenge dict lacks required      │ "missing required"     │ True             │
+# │ login_request_exception        │ non-connectivity on login POST     │ "login request failed" │ False            │
+# │ login_not_dict_*               │ login body is non-dict JSON        │ "expected json object" │ True             │
+# │ login_unexpected_result        │ LoginResult value is unrecognized  │ "unexpected result"    │ True             │
+# └────────────────────────────────┴────────────────────────────────────┴────────────────────────┴──────────────────┘
+# expects_response: True when a Response was in scope at failure (collector's
+# _log_auth_failure_detail can dump request/response detail). False when the
+# failure fires before any response object exists (RequestException paths).
+#
+# fmt: off
+_FAILURE_CASES = [
+    # (description,                     setup_fn,                          expected_error,          expects_response)
+    ("challenge_request_exception",     _setup_challenge_request_exception, "challenge request",     False),
+    ("challenge_not_dict_string",       _setup_challenge_not_dict_string,   "expected json object",  True),
+    ("challenge_not_dict_list",         _setup_challenge_not_dict_list,     "expected json object",  True),
+    ("challenge_not_dict_int",          _setup_challenge_not_dict_int,      "expected json object",  True),
+    ("challenge_missing_fields",        _setup_challenge_missing_fields,    "missing required",      True),
+    ("login_request_exception",         _setup_login_request_exception,     "login request failed",  False),
+    ("login_not_dict_string",           _setup_login_not_dict_string,       "expected json object",  True),
+    ("login_not_dict_list",             _setup_login_not_dict_list,         "expected json object",  True),
+    ("login_not_dict_int",              _setup_login_not_dict_int,          "expected json object",  True),
+    ("login_unexpected_result",         _setup_login_unexpected_result,     "unexpected result",     True),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    "desc,setup_fn,expected_error,expects_response",
+    _FAILURE_CASES,
+    ids=[c[0] for c in _FAILURE_CASES],
+)
+def test_failure_scenario(
+    desc: str,
+    setup_fn: Any,
+    expected_error: str,
+    expects_response: bool,
+) -> None:
+    """Auth failure produces expected error and response state.
+
+    Drives the full HNAP failure surface from ``_FAILURE_CASES``. Adding a
+    new failure mode means a row + setup helper, not a new test method.
+    The hnap_server-based ``test_login_failure`` covers FAILED/LOCKUP/REBOOT
+    via the real crypto round-trip; this table covers the parse-failure,
+    RequestException, and unexpected-result paths via mocks.
+    """
+    manager = _make_manager()
+    session = requests.Session()
 
     with patch.object(session, "post") as mock_post:
-        mock_post.side_effect = [challenge_resp, login_resp]
+        setup_fn(mock_post)
         result = manager.authenticate(session, "http://192.168.100.1", "admin", "pw")
 
     assert result.success is False
-    assert "json object" in result.error.lower()
+    assert expected_error.lower() in result.error.lower()
+    assert (result.response is not None) is expects_response
 
 
 def test_connection_refused() -> None:
-    """ConnectionError propagates for collector to classify as CONNECTIVITY."""
+    """ConnectionError on challenge POST propagates for collector to classify."""
     manager = _make_manager()
     session = requests.Session()
 
     with pytest.raises(requests.ConnectionError):
         manager.authenticate(session, "http://127.0.0.1:1", "admin", "pw")
+
+
+def test_login_connection_error_propagates() -> None:
+    """ConnectionError on login POST (after challenge succeeds) propagates."""
+    manager = _make_manager()
+    session = requests.Session()
+
+    with patch.object(session, "post") as mock_post:
+        mock_post.side_effect = [_challenge_ok(), requests.ConnectionError("lost mid-flow")]
+        with pytest.raises(requests.ConnectionError):
+            manager.authenticate(session, "http://192.168.100.1", "admin", "pw")
 
 
 # ┌─────────────┬──────────┬──────────────────────────┐

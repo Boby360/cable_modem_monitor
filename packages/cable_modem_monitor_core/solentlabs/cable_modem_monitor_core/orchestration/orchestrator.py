@@ -98,7 +98,7 @@ class Orchestrator:
 
         # Diagnostics state
         self._last_poll_duration: float | None = None
-        self._last_poll_timestamp: float | None = None
+        self._last_poll_at: str | None = None
 
         # Monotonic timestamp of the last CONNECTIVITY failure. Used
         # by the "health recovery clears connectivity backoff"
@@ -126,12 +126,12 @@ class Orchestrator:
             status fields.
         """
         start = time.monotonic()
+        self._last_poll_at = datetime.now(UTC).isoformat()
 
         try:
             snapshot = self._execute_poll()
         finally:
             self._last_poll_duration = time.monotonic() - start
-            self._last_poll_timestamp = start
 
         return snapshot
 
@@ -195,8 +195,10 @@ class Orchestrator:
             auth_strategy=auth.strategy if auth else "",
             connectivity_streak=self._policy.connectivity_streak,
             connectivity_backoff_remaining=self._policy.connectivity_backoff_remaining,
+            stale_session_recovery_streak=self._policy.stale_session_recovery_streak,
+            session_reuse_disabled=self._policy.session_reuse_disabled,
             resource_fetches=self._collector.last_resource_fetches,
-            last_poll_timestamp=self._last_poll_timestamp,
+            last_poll_at=self._last_poll_at,
         )
 
     @property
@@ -306,25 +308,73 @@ class Orchestrator:
         # Log poll context — INFO on first poll, DEBUG on steady-state
         self._log_poll_context()
 
+        if not self._policy.should_attempt_session_reuse() and self._collector.session_is_valid:
+            _logger.debug(
+                "Session reuse disabled [%s] — clearing session before poll",
+                self._modem_config.model,
+            )
+            self._collector.clear_session()
+
         # Notify health monitor — avoids redundant HTTP probe during collection
         if self._health_monitor is not None:
             self._health_monitor.record_collection_start()
 
         collection_success = False
+        load_auth_recovered = False
         try:
             result = self._collector.execute()
             collection_success = result.success
 
+            if not result.success and result.signal in (
+                CollectorSignal.LOAD_AUTH,
+                CollectorSignal.LOAD_INTEGRITY,
+            ):
+                result = self._retry_load_auth_once(result.signal)
+                collection_success = result.success
+                load_auth_recovered = result.success
+
             if not result.success:
+                self._policy.reset_stale_session_recovery_streak()
                 self._log_poll_result(result)
                 return self._handle_failure(result)
 
-            self._first_poll_complete = True
+            if not load_auth_recovered:
+                self._policy.reset_stale_session_recovery_streak()
+
             self._log_poll_result(result)
+            self._first_poll_complete = True
             return self._handle_success(result)
         finally:
             if self._health_monitor is not None:
                 self._health_monitor.record_collection_end(collection_success)
+
+    def _retry_load_auth_once(self, signal: CollectorSignal) -> ModemResult:
+        """Retry one auth-integrity failure immediately with a fresh session.
+
+        Handles both LOAD_AUTH (session expiry, stale auth state) and
+        LOAD_INTEGRITY (stub-page response, UC-19a). Both indicate the
+        current session is unable to retrieve real data; clearing it
+        and re-authenticating in the same poll smooths over the failure
+        without waiting for the next scheduled cycle.
+        """
+        signal_name = signal.value.upper()
+        _logger.info(
+            "%s [%s] — clearing session and retrying once in same poll",
+            signal_name,
+            self._modem_config.model,
+        )
+        self._collector.clear_session()
+
+        retry_result = self._collector.execute()
+        if retry_result.success:
+            self._policy.record_stale_session_recovery()
+            _logger.info(
+                "%s recovered [%s] — fresh login succeeded in same poll",
+                signal_name,
+                self._modem_config.model,
+            )
+
+        return retry_result
 
     def _handle_failure(self, result: ModemResult) -> ModemSnapshot:
         """Apply signal policy for a failed collection."""
@@ -459,7 +509,7 @@ class Orchestrator:
         )
 
     def _log_poll_result(self, result: ModemResult) -> None:
-        """Log poll outcome. Parse line at INFO always. Failure at WARNING."""
+        """Log poll outcome. First success at INFO, steady-state at DEBUG."""
         model = self._modem_config.model
 
         if not result.success:
@@ -474,7 +524,8 @@ class Orchestrator:
         ds = len(result.modem_data.get("downstream", [])) if result.modem_data else 0
         us = len(result.modem_data.get("upstream", [])) if result.modem_data else 0
 
-        _logger.info(
+        log = _logger.info if not self._first_poll_complete else _logger.debug
+        log(
             "Parse complete [%s]: %d DS, %d US channels",
             model,
             ds,

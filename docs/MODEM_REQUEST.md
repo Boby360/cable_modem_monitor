@@ -27,26 +27,23 @@ WiFi settings, router configuration, device lists, account information.
 
 ## Step 1 — Capture
 
-Use [har-capture](https://github.com/solentlabs/har-capture) to record
-the HTTP conversation between your browser and your modem:
+Follow [har-capture's quickstart](https://github.com/solentlabs/har-capture#quick-start)
+to record the HTTP conversation between your browser and your modem.
+Use your modem's IP as the capture target (the default cable modem IP
+is `192.168.100.1`). If your modem requires HTTP Basic Auth, see the
+auth flags in har-capture's CLI reference.
 
-```bash
-pip install "har-capture[full]"
+A few cable-modem-specific tips on top of the upstream guide:
 
-# Default cable modem IP
-har-capture 192.168.100.1
+- **Use an incognito/private browsing window.** If your browser has a
+  cached session, the capture will miss the login flow and won't be
+  usable for building a parser.
+- **During capture**, log in if needed, visit all status pages, and
+  wait 3–5 seconds per page for async data to load before closing the
+  browser.
 
-# If your modem uses HTTP Basic Auth
-har-capture 192.168.100.1 -u admin -p yourpassword
-```
-
-**Use an incognito/private browsing window** — if your browser has a
-cached session, the capture will miss the login flow and won't be
-usable for building a parser.
-
-During capture: log in if needed, visit all status pages, wait 3–5
-seconds per page for async data to load, then close the browser. The
-tool produces a sanitized, gzipped `.sanitized.har.gz` file.
+har-capture produces a sanitized, gzipped `.sanitized.har.gz` file —
+that's the artifact to attach in Step 3.
 
 ## Step 2 — Review for PII
 

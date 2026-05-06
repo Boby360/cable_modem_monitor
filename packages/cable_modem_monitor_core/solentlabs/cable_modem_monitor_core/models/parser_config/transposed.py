@@ -7,11 +7,12 @@ Per PARSING_SPEC.md HTMLTableTransposedParser section.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from .common import ChannelTypeConfig, RowMapping, TableSelector
+from .format_registry import DecodeKind
 
 
 class TransposedTableDefinition(BaseModel):
@@ -30,6 +31,10 @@ class HTMLTableTransposedSection(BaseModel):
     Supports flat form (selector + rows at top level) or multi-table form
     (tables list). Mutually exclusive.
     """
+
+    format_tag: ClassVar[str] = "table_transposed"
+    decode_kind: ClassVar[DecodeKind] = "html"
+    transports: ClassVar[frozenset[str]] = frozenset({"http"})
 
     model_config = ConfigDict(extra="forbid")
     format: Literal["table_transposed"]

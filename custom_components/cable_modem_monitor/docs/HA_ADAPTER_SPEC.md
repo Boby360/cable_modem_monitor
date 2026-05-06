@@ -799,7 +799,7 @@ included automatically when new diagnostics are added to the model.
 - `connectivity_backoff_remaining` — polls to skip before retry
 - `resource_fetches` — per-resource timing and size from last
   successful collection (path, duration_ms, size_bytes per resource)
-- `last_poll_timestamp` — monotonic time of last poll
+- `last_poll_at` — ISO 8601 wall-clock timestamp (UTC) of last poll
 
 **Auth-failure detail surfaces in `recent_logs`.** When auth fails,
 the collector emits a single sanitized ``WARNING`` log carrying
@@ -882,7 +882,8 @@ they are Core parser output, not HA-layer evaluations.
 |-------|------|--------|
 | `health_status` | string | Health probe result (`"none"` if unavailable) |
 | `icmp_latency_ms` | float or null | ICMP round-trip (null if not supported) |
-| `http_latency_ms` | float or null | HTTP response time (null if not attempted) |
+| `tcp_latency_ms` | float or null | TCP handshake to web port (null if HTTP probe disabled or skipped) |
+| `http_latency_ms` | float or null | HTTP HEAD server response time (null if `supports_head=False`, HEAD failed, or skipped) |
 
 ### `system_info` — Parser Output
 
