@@ -7,7 +7,6 @@ downstream:
         map:
           "256 QAM": "qam"
           "OFDM": "ofdm"
-
       rows:
         - field: channel_id
           label: "Channel ID"
@@ -45,10 +44,10 @@ downstream:
         - field: uncorrected
           label: "Uncorrectable Codewords"
           type: integer
-
       selector:
         match: "CM Error Codewords"
         type: header_text
+
 upstream:
   format: table_transposed
   resource: "/network_setup.jst"
@@ -75,11 +74,11 @@ upstream:
       type: integer
     - field: channel_type
       label: "Channel Type"
+      type: string
       map:
         "ATDMA": "atdma"
         "TDMA": "atdma"
         "TDMA_AND_ATDMA": "atdma"
-      type: string
   selector:
     match: "Upstream"
     type: header_text
